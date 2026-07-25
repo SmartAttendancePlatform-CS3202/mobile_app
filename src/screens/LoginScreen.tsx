@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import api from '../services/api';
 
 interface LoginScreenProps {
@@ -13,6 +14,34 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [inLectureHall, setInLectureHall] = useState(false);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [locationError, setLocationError] = useState('');
+
+  const handleCheckboxToggle = async () => {
+    const newValue = !inLectureHall;
+    setInLectureHall(newValue);
+    
+    if (newValue) {
+      setLocationError('');
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setLocationError('Permission to access location was denied');
+          setInLectureHall(false);
+          return;
+        }
+
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        setLocation(currentLocation);
+      } catch (err) {
+        setLocationError('Failed to get location');
+        setInLectureHall(false);
+      }
+    } else {
+      setLocation(null);
+    }
+  };
 
   const handleLogin = async () => {
     setLoading(true);
@@ -79,6 +108,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
               </TouchableOpacity>
             </View>
           </View>
+          
+          <TouchableOpacity 
+            style={styles.checkboxContainer} 
+            onPress={handleCheckboxToggle}
+          >
+            <View style={[styles.checkbox, inLectureHall && styles.checkboxChecked]}>
+              {inLectureHall && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+            </View>
+            <Text style={styles.checkboxLabel}>I am in the lecture hall</Text>
+          </TouchableOpacity>
+          
+          {locationError ? (
+            <Text style={styles.locationErrorText}>{locationError}</Text>
+          ) : null}
           
           {error ? (
             <View style={styles.errorContainer}>
@@ -197,6 +240,33 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '500',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: '#4F46E5',
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  checkboxChecked: {
+    backgroundColor: '#4F46E5',
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#374151',
+  },
+  locationErrorText: {
+    color: '#EF4444',
+    fontSize: 12,
+    marginBottom: 10,
   },
   button: {
     backgroundColor: '#4F46E5',
