@@ -1,4 +1,5 @@
 import { mockStudent, mockSessions, mockAttendanceHistory } from './mockData';
+import { sendFaceVerificationRequest } from '../embedding/embeddingApi';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -51,6 +52,10 @@ class ApiService {
   async getHistory() {
     await delay(800);
     return { success: true, history: mockAttendanceHistory };
+  }
+
+  async sendFaceVerification(embedding: Float32Array) {
+    return await sendFaceVerificationRequest(embedding);
   }
 
   private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
