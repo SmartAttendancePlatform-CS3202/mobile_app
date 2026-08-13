@@ -125,20 +125,13 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
       await new Promise((resolve) => setTimeout(resolve, 400));
 
       // Step e: Payload Transmission & Face Registration
-      const verificationResponse = await api.sendFaceVerification(embedding);
+      const regResponse = await api.registerFace(embedding);
 
-      if (verificationResponse.success) {
-        const faceCode = `face_embedding_${Array.from(embedding).slice(0, 5).join('_')}`;
-        const regResponse = await api.registerFace(faceCode);
-
-        if (regResponse.success) {
-          onSuccess();
-        } else {
-          setError(regResponse.message || 'Face registration failed.');
-        }
+      if (regResponse.success) {
+        onSuccess();
       } else {
         stateMachineRef.current.handleFailure('Payload transmission failed');
-        setError('Payload transmission failed.');
+        setError(regResponse.message || 'Face registration failed.');
       }
     } catch (err) {
       console.error('[OnboardingScreen] Registration pipeline error:', err);

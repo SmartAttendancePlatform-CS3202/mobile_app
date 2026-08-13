@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 
 interface LoginScreenProps {
@@ -9,7 +10,8 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  const [email, setEmail] = useState('johndoe@university.edu');
+  const { login, isFaceRegistered } = useAuth();
+  const [email, setEmail] = useState('savindu.23@cse.mrt.ac.lk');
   const [password, setPassword] = useState('password123');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -47,9 +49,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setLoading(true);
     setError('');
     try {
-      const response = await api.login(email, password);
-      if (response.success && response.student) {
-        onLoginSuccess(response.student.isFaceRegistered);
+      const response = await login(email, password);
+      if (response.success) {
+        onLoginSuccess(isFaceRegistered);
       } else {
         setError(response.message || 'Login failed');
       }

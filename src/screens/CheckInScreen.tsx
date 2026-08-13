@@ -159,30 +159,42 @@ export default function CheckInScreen() {
       await new Promise((resolve) => setTimeout(resolve, 400));
 
       // Step e: Payload Transmission & Server Verification
-      const verificationResponse = await api.sendFaceVerification(embedding);
-
-      if (verificationResponse.success) {
-        setStatusText('Verified & Transmitted!');
-        setStatusState('ready');
-
-        // Complete Session Check-In
-        const faceCode = `face_embedding_${Array.from(embedding).slice(0, 5).join('_')}`;
-        const currentLat = location ? location.coords.latitude : 0;
-        const currentLng = location ? location.coords.longitude : 0;
-
-        const checkInResponse = await api.checkIn(sessionId, currentLat, currentLng, faceCode);
-        if (checkInResponse.success) {
-          Alert.alert('Success', 'You have been successfully checked in!', [
-            { text: 'Awesome', onPress: () => navigation.goBack() }
-          ]);
-        } else {
-          Alert.alert('Check-In Failed', checkInResponse.message);
-        }
-      } else {
-        stateMachineRef.current.handleFailure('Payload transmission failed');
-        setStatusText('Transmission failed.');
-        setStatusState('error');
+      const windowsRes = await api.getActiveWindows(sessionId);
+      if (!windowsRes.success || !windowsRes.windows) {
+        throw new Error('Failed to fetch active check-in windows');
       }
+
+      const randomWindowId = windowsRes.windows.random_check_window?.id;
+      const firstCheckInWindow = windowsRes.windows.first_check_in_window;
+
+      // 1. First time: Face verification (Random Check)
+      if (randomWindowId) {
+        setStatusText('Transmitting face verification...');
+        const faceCheckRes = await api.checkInWithFace(sessionId, randomWindowId, location!.coords.latitude, location!.coords.longitude, embedding);
+        if (!faceCheckRes.success) {
+          throw new Error(faceCheckRes.message);
+        }
+      }
+
+      // 2. Second time: Get location again and do regular tick
+      if (firstCheckInWindow) {
+        setStatusText('Getting location again for tick...');
+        const secondLoc = await Location.getCurrentPositionAsync({});
+        const tickRes = await api.checkInLocationOnly(sessionId, secondLoc.coords.latitude, secondLoc.coords.longitude);
+        if (!tickRes.success) {
+          throw new Error(tickRes.message);
+        }
+      }
+
+      if (!randomWindowId && !firstCheckInWindow) {
+        throw new Error('No active check-in windows found for this session.');
+      }
+
+      setStatusText('Verified & Transmitted!');
+      setStatusState('ready');
+      Alert.alert('Success', 'You have been successfully checked in!', [
+        { text: 'Awesome', onPress: () => navigation.goBack() }
+      ]);
     } catch (err) {
       console.error('[CheckInScreen] Pipeline execution error:', err);
       stateMachineRef.current.handleFailure('Pipeline execution error');
