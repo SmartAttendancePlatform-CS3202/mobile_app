@@ -150,19 +150,7 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
 
   return (
     <View style={styles.overlayContainer} pointerEvents="none">
-      {/* Status Banner */}
-      <View style={styles.bannerWrapper}>
-        <View
-          style={[
-            styles.banner,
-            currentState === 'EMBEDDING_READY' && styles.bannerSuccess,
-            (currentState === 'FAILED' || currentState === 'TIMEOUT') && styles.bannerError,
-          ]}
-        >
-          <View style={[styles.statusDot, { backgroundColor: getBorderColor() }]} />
-          <Text style={styles.bannerText}>{statusMessage}</Text>
-        </View>
-      </View>
+
 
       {/* Bounding Box Rect & Facial Landmarks */}
       {validDimensions && boundingBox ? (

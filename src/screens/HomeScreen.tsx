@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { mockStudent, mockAcademicInfo } from '../services/mockData';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import Skeleton from '../components/Skeleton';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
@@ -14,34 +15,40 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const currentDay = days[new Date().getDay()];
-      
-      const res = await api.getTimetableSchedule(currentDay);
-      if (res.success && res.sessions) {
-        let todaySessions = res.sessions.filter((s: any) => s.type !== 'Break' && s.type !== 'Event');
+    const task = InteractionManager.runAfterInteractions(() => {
+      (async () => {
+        setLoading(true);
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const currentDay = days[new Date().getDay()];
         
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-        todaySessions = todaySessions.map((s: any) => {
-          const [startHour, startMin] = s.startTime.split(':').map(Number);
-          const [endHour, endMin] = s.endTime.split(':').map(Number);
-          const startTotal = startHour * 60 + startMin;
-          const endTotal = endHour * 60 + endMin;
+        const res = await api.getTimetableSchedule(currentDay);
+        if (res.success && res.sessions) {
+          let todaySessions = res.sessions.filter((s: any) => s.type !== 'Break' && s.type !== 'Event');
           
-          return {
-            ...s,
-            isActive: currentMinutes >= startTotal && currentMinutes <= endTotal
-          };
-        });
-        
-        setSessions(todaySessions);
-      }
-      setLoading(false);
-    })();
+          const now = new Date();
+          const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+          todaySessions = todaySessions.map((s: any) => {
+            const [startHour, startMin] = s.startTime.split(':').map(Number);
+            const [endHour, endMin] = s.endTime.split(':').map(Number);
+            const startTotal = startHour * 60 + startMin;
+            const endTotal = endHour * 60 + endMin;
+            
+            return {
+              ...s,
+              isActive: currentMinutes >= startTotal && currentMinutes <= endTotal,
+              isCheckInAllowed: currentMinutes >= (startTotal - 15) && currentMinutes <= endTotal,
+              isEnded: currentMinutes > endTotal
+            };
+          });
+          
+          setSessions(todaySessions);
+        }
+        setLoading(false);
+      })();
+    });
+
+    return () => task.cancel();
   }, []);
 
   return (
@@ -83,7 +90,10 @@ export default function HomeScreen() {
       <Text style={styles.sectionTitle}>Today's & Upcoming Classes</Text>
 
       {loading ? (
-        <ActivityIndicator size="large" color="#4F46E5" style={{ marginTop: 20 }} />
+        <View style={{ gap: 16, marginTop: 10 }}>
+          <Skeleton height={180} borderRadius={16} />
+          <Skeleton height={180} borderRadius={16} />
+        </View>
       ) : sessions.length === 0 ? (
         <Text style={{ textAlign: 'center', marginTop: 20, color: '#6B7280' }}>No classes scheduled for today.</Text>
       ) : (
@@ -136,19 +146,40 @@ export default function HomeScreen() {
             </View>
             
             <TouchableOpacity 
-              style={[styles.checkInButton, session.isActive ? styles.buttonActive : styles.buttonInactive]}
-              onPress={() => navigation.navigate('CheckIn', { sessionId: session.id })}
+              style={[
+                styles.checkInButton, 
+                session.isActive 
+                  ? styles.buttonActive 
+                  : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)
+              ]}
+              onPress={() => {
+                if (session.isCheckInAllowed) {
+                  navigation.navigate('LocationCheck', { sessionId: session.id });
+                }
+              }}
+              disabled={!session.isCheckInAllowed}
             >
               <Ionicons 
-                name={session.isActive ? "finger-print-outline" : "checkmark-circle-outline"} 
+                name={session.isActive ? "finger-print-outline" : (session.isCheckInAllowed ? "time-outline" : "lock-closed-outline")} 
                 size={18} 
-                color={session.isActive ? "#fff" : "#4F46E5"} 
+                color={session.isActive ? "#fff" : (session.isCheckInAllowed ? "#4F46E5" : "#9CA3AF")} 
                 style={{ marginRight: 6 }}
               />
-              <Text style={[styles.checkInButtonText, session.isActive ? styles.buttonTextActive : styles.buttonTextInactive]}>
-                {session.isActive ? "Check-In to Live Class" : "Select & Check-In"}
+              <Text style={[
+                styles.checkInButtonText, 
+                session.isActive 
+                  ? styles.buttonTextActive 
+                  : (session.isCheckInAllowed ? styles.buttonTextAllowed : styles.buttonTextDisabled)
+              ]}>
+                {session.isActive 
+                  ? "Check-In to Live Class" 
+                  : (session.isCheckInAllowed 
+                      ? "Check-In Open Early" 
+                      : (session.isEnded ? "Class Ended" : "Check-In Opens 15m Prior"))}
               </Text>
-              <Ionicons name="arrow-forward" size={18} color={session.isActive ? "#fff" : "#4F46E5"} />
+              {session.isCheckInAllowed && (
+                <Ionicons name="arrow-forward" size={18} color={session.isActive ? "#fff" : "#4F46E5"} />
+              )}
             </TouchableOpacity>
           </View>
         ))
@@ -372,8 +403,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
-  buttonInactive: {
+  buttonAllowed: {
     backgroundColor: '#EEF2FF',
+  },
+  buttonDisabled: {
+    backgroundColor: '#F3F4F6',
   },
   checkInButtonText: {
     fontSize: 15,
@@ -383,8 +417,11 @@ const styles = StyleSheet.create({
   buttonTextActive: {
     color: '#FFFFFF',
   },
-  buttonTextInactive: {
+  buttonTextAllowed: {
     color: '#4F46E5',
+  },
+  buttonTextDisabled: {
+    color: '#9CA3AF',
   }
 });
 
