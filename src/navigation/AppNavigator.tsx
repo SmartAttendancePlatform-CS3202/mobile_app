@@ -8,6 +8,7 @@ import HomeScreen from '../screens/HomeScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import TimetableScreen from '../screens/TimetableScreen';
 import CheckInScreen from '../screens/CheckInScreen';
+import LocationCheckScreen from '../screens/LocationCheckScreen';
 import AccountScreen from '../screens/AccountScreen';
 
 const Stack = createNativeStackNavigator();
@@ -18,6 +19,7 @@ function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
+        freezeOnBlur: true,
         headerShown: route.name !== 'Account',
         headerStyle: { backgroundColor: '#F3F4F6', elevation: 0, shadowOpacity: 0, borderBottomWidth: 0 },
         headerTitleStyle: { color: '#111827', fontWeight: 'bold', fontSize: 22 },
@@ -60,6 +62,17 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MainTabs" component={MainTabs} />
+      <Stack.Screen 
+        name="LocationCheck" 
+        component={LocationCheckScreen} 
+        options={{ 
+          headerShown: true, 
+          title: 'Location Verification',
+          headerStyle: { backgroundColor: '#F3F4F6' },
+          headerTintColor: '#111827',
+          headerTitleStyle: { fontWeight: 'bold' }
+        }} 
+      />
       <Stack.Screen 
         name="CheckIn" 
         component={CheckInScreen} 
