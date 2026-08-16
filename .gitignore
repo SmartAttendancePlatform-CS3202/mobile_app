@@ -42,3 +42,6 @@ yarn-error.*
 
 /.agents
 /.claude
+AGENTS.md
+CLAUDE.md
+agents.md

@@ -1,57 +1,26 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 // Import Screens
-import LoginScreen from '../screens/LoginScreen';
-import OnboardingScreen from '../screens/OnboardingScreen';
 import HomeScreen from '../screens/HomeScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import TimetableScreen from '../screens/TimetableScreen';
 import CheckInScreen from '../screens/CheckInScreen';
+import LocationCheckScreen from '../screens/LocationCheckScreen';
+import AccountScreen from '../screens/AccountScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
-
-// Account Tab Flow
-function AccountTab() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isFaceRegistered, setIsFaceRegistered] = useState(false);
-
-  const handleLoginSuccess = (registered: boolean) => {
-    setIsAuthenticated(true);
-    setIsFaceRegistered(registered);
-  };
-
-  const handleFaceRegistrationSuccess = () => {
-    setIsFaceRegistered(true);
-  };
-
-  if (!isAuthenticated) {
-    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
-  }
-
-  if (!isFaceRegistered) {
-    return <OnboardingScreen onSuccess={handleFaceRegistrationSuccess} />;
-  }
-
-  return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F3F4F6' }}>
-      <Ionicons name="checkmark-circle" size={80} color="#10B981" style={{ marginBottom: 20 }} />
-      <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#111827', marginBottom: 10 }}>Account Ready</Text>
-      <Text style={{ fontSize: 16, color: '#6B7280' }}>You are logged in and your face is registered.</Text>
-    </View>
-  );
-}
 
 // Bottom Tabs for main app flow
 function MainTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        headerShown: true,
+        freezeOnBlur: true,
+        headerShown: route.name !== 'Account',
         headerStyle: { backgroundColor: '#F3F4F6', elevation: 0, shadowOpacity: 0, borderBottomWidth: 0 },
         headerTitleStyle: { color: '#111827', fontWeight: 'bold', fontSize: 22 },
         tabBarIcon: ({ focused, color, size }) => {
@@ -83,7 +52,7 @@ function MainTabs() {
       <Tab.Screen name="Dashboard" component={HomeScreen} />
       <Tab.Screen name="Timetable" component={TimetableScreen} />
       <Tab.Screen name="History" component={HistoryScreen} />
-      <Tab.Screen name="Account" component={AccountTab} />
+      <Tab.Screen name="Account" component={AccountScreen} />
     </Tab.Navigator>
   );
 }
@@ -93,6 +62,17 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="MainTabs" component={MainTabs} />
+      <Stack.Screen 
+        name="LocationCheck" 
+        component={LocationCheckScreen} 
+        options={{ 
+          headerShown: true, 
+          title: 'Location Verification',
+          headerStyle: { backgroundColor: '#F3F4F6' },
+          headerTintColor: '#111827',
+          headerTitleStyle: { fontWeight: 'bold' }
+        }} 
+      />
       <Stack.Screen 
         name="CheckIn" 
         component={CheckInScreen} 
