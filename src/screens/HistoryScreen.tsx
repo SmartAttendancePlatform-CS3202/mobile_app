@@ -1,26 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, InteractionManager } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
+import Skeleton from '../components/Skeleton';
 
 export default function HistoryScreen() {
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      const response = await api.getHistory();
-      if (response.success) {
-        setHistory(response.history);
-      }
-      setLoading(false);
-    })();
+    const task = InteractionManager.runAfterInteractions(() => {
+      (async () => {
+        const response = await api.getHistory();
+        if (response.success) {
+          const sortedHistory = [...response.history].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setHistory(sortedHistory);
+        }
+        setLoading(false);
+      })();
+    });
+
+    return () => task.cancel();
   }, []);
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4F46E5" />
+      <View style={[styles.container, { paddingTop: 20 }]}>
+        <Text style={styles.title}>Attendance History</Text>
+        <View style={{ gap: 12 }}>
+          <Skeleton height={80} borderRadius={16} />
+          <Skeleton height={80} borderRadius={16} />
+          <Skeleton height={80} borderRadius={16} />
+          <Skeleton height={80} borderRadius={16} />
+        </View>
       </View>
     );
   }
@@ -41,7 +53,7 @@ export default function HistoryScreen() {
                 <View style={[styles.iconContainer, isPresent ? styles.iconPresent : styles.iconAbsent]}>
                   <Ionicons name={isPresent ? "checkmark" : "close"} size={20} color={isPresent ? "#10B981" : "#EF4444"} />
                 </View>
-                <View>
+                <View style={styles.textContainer}>
                   <Text style={styles.courseName}>{item.course}</Text>
                   <Text style={styles.date}>{item.date}</Text>
                 </View>
@@ -105,6 +117,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  textContainer: {
+    flex: 1,
   },
   iconPresent: {
     backgroundColor: '#ECFDF5',

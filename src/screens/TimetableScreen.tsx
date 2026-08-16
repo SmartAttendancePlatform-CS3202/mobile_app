@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import api from '../services/api';
 import { ClassSession, AcademicHeaderInfo, mockAcademicInfo } from '../services/mockData';
+import Skeleton from '../components/Skeleton';
 
 const DAYS = [
   { key: 'Monday', label: 'Mon' },
@@ -44,18 +46,22 @@ export default function TimetableScreen() {
   const [selectedDay, setSelectedDay] = useState<string>(currentDayName);
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const res = await api.getSessions();
-      if (res.success && res.sessions) {
-        setSessions(res.sessions);
-      }
-      const infoRes = await api.getAcademicInfo();
-      if (infoRes.success && infoRes.info) {
-        setAcademicInfo(infoRes.info);
-      }
-      setLoading(false);
-    })();
+    const task = InteractionManager.runAfterInteractions(() => {
+      (async () => {
+        setLoading(true);
+        const res = await api.getSessions();
+        if (res.success && res.sessions) {
+          setSessions(res.sessions);
+        }
+        const infoRes = await api.getAcademicInfo();
+        if (infoRes.success && infoRes.info) {
+          setAcademicInfo(infoRes.info);
+        }
+        setLoading(false);
+      })();
+    });
+
+    return () => task.cancel();
   }, []);
 
   const filteredSessions = useMemo(() => {
@@ -132,9 +138,18 @@ export default function TimetableScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4F46E5" />
-        <Text style={styles.loadingText}>Loading Timetable...</Text>
+      <View style={[styles.container, { padding: 16 }]}>
+        <Skeleton height={100} borderRadius={16} style={{ marginBottom: 16, marginTop: 12 }} />
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+          <Skeleton width={60} height={36} borderRadius={12} />
+          <Skeleton width={60} height={36} borderRadius={12} />
+          <Skeleton width={60} height={36} borderRadius={12} />
+        </View>
+        <View style={{ gap: 14 }}>
+          <Skeleton height={120} borderRadius={16} />
+          <Skeleton height={120} borderRadius={16} />
+          <Skeleton height={120} borderRadius={16} />
+        </View>
       </View>
     );
   }
