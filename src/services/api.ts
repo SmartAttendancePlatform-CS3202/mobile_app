@@ -1,4 +1,4 @@
-import apiClient from './apiClient';
+import apiClient, { SUPABASE_URL, SUPABASE_ANON_KEY } from './apiClient';
 import { mockTimetableSchedule, mockAcademicInfo, mockAttendanceHistory, mockStudent } from './mockData';
 
 class ApiService {
@@ -8,9 +8,9 @@ class ApiService {
         email,
         password,
       }, {
-        baseURL: 'http://10.0.2.2:54321', // Supabase local URL
+        baseURL: SUPABASE_URL,
         headers: {
-          apikey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZmF1bHQiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTY5MzUxMTMyNiwiZXhwIjoxODgzMTE1MjMyNn0.randomkeyhere'
+          apikey: SUPABASE_ANON_KEY
         }
       });
       return { success: true, token: response.data.access_token, user: response.data.user };
@@ -72,13 +72,23 @@ class ApiService {
     if (day && day !== 'All') {
       return {
         success: true,
-        sessions: mockTimetableSchedule.filter(s => s.day.toLowerCase() === day.toLowerCase())
+        sessions: mockTimetableSchedule.filter(s => s.day.toLowerCase() === day.toLowerCase() || s.id === 'TEST_MOCK_CLASS')
       };
     }
     return { success: true, sessions: mockTimetableSchedule };
   }
 
   async getActiveWindows(sessionId: string) {
+    if (sessionId === 'TEST_MOCK_CLASS') {
+      return {
+        success: true,
+        windows: {
+          first_check_in_window: { id: 'mock_window_1', start_time: new Date().toISOString(), end_time: new Date(Date.now() + 3600000).toISOString() },
+          random_check_window: { id: 'mock_random_window_1', start_time: new Date().toISOString(), end_time: new Date(Date.now() + 3600000).toISOString() }
+        }
+      };
+    }
+    
     try {
       const response = await apiClient.get(`/checkin/windows/active?lecture_session_id=${sessionId}`);
       return { success: true, windows: response.data };
@@ -88,7 +98,12 @@ class ApiService {
   }
 
   async checkInWithFace(sessionId: string, windowId: string, lat: number, lng: number, faceEmbedding: Float32Array | number[]) {
+    if (sessionId === 'TEST_MOCK_CLASS') {
+      return { success: true, data: { message: 'Mock face check-in successful' } };
+    }
     try {
+      // NOTE: The mobile app now sends the face embedding for manual check-ins as well.
+      // This anticipates the backend update where this endpoint (or a unified one) accepts the embedding.
       const embeddingArray = Array.from(faceEmbedding);
       const response = await apiClient.post('/checkin/random-check', {
         lecture_session_id: sessionId,
@@ -104,6 +119,9 @@ class ApiService {
   }
 
   async checkInLocationOnly(sessionId: string, lat: number, lng: number) {
+    if (sessionId === 'TEST_MOCK_CLASS') {
+      return { success: true, data: { message: 'Mock location check-in successful' } };
+    }
     try {
       const response = await apiClient.post('/checkin/tick', {
         lecture_session_id: sessionId,

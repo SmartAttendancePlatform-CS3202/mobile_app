@@ -411,8 +411,25 @@ export const mockTimetableSchedule: ClassSession[] = [
     dayIndex: 5,
     startTime: '13:15',
     endTime: '15:15',
-    duration: '2h',
     isActive: false,
+    geofence: UOM_CSE_COORDS,
+  },
+
+  // --- ALWAYS AVAILABLE MOCK CLASS FOR TESTING ---
+  {
+    id: 'TEST_MOCK_CLASS',
+    courseCode: 'TEST0000',
+    courseName: 'Testing & Debugging (Mock)',
+    lecturer: 'System',
+    type: 'L',
+    typeLabel: 'Mock (L)',
+    venue: 'Anywhere',
+    day: 'Everyday' as any,
+    dayIndex: 0,
+    startTime: '00:00',
+    endTime: '23:59',
+    duration: '24h',
+    isActive: true,
     geofence: UOM_CSE_COORDS,
   },
 ];
