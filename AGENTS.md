@@ -12,5 +12,7 @@ When testing on a physical Android device connected via USB:
 1. **Verify ADB device**: Ensure `adb devices` lists the attached device.
 2. **Set up port forwarding**: Run `adb reverse tcp:8081 tcp:8081` so the device can seamlessly connect to Metro on localhost.
 3. **Start Metro**: Run `npx expo start --dev-client`.
-4. **Launch Dev Client**: Press `a` in the Expo CLI or launch directly via `adb shell am start -n com.anonymous.mobileapp/.MainActivity --user 0`.
+4. **Launch Dev Client**: To ensure the dev client connects via the USB tunnel rather than failing on the LAN IP, launch it via deep link using:
+   `adb shell am start -a android.intent.action.VIEW -d "exp+mobile-app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081" com.anonymous.mobileapp`
+   *(Alternatively, instruct the user to manually enter `http://127.0.0.1:8081` in the app's connection screen).*
 
