@@ -5,8 +5,26 @@ export interface StudentProfile {
   isFaceRegistered: boolean;
   faceEmbeddingCode?: string;
   indexNumber?: string;
+  nameWithInitials?: string;
+  displayName?: string;
   department?: string;
+  departmentCode?: string;
+  facultyName?: string;
+  facultyHead?: string;
+  academicYear?: string;
+  yearLevel?: number;
   batch?: string;
+  status?: string;
+  role?: string;
+  nic?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  contactNumber?: string;
+  address?: string;
+  photoUrl?: string;
+  createdAt?: string;
+  faceRegisteredAt?: string;
+  faceQualityScore?: number;
 }
 
 export type SessionType = 'L' | 'P' | 'L & P' | 'Event' | 'Break';
@@ -411,6 +429,7 @@ export const mockTimetableSchedule: ClassSession[] = [
     dayIndex: 5,
     startTime: '13:15',
     endTime: '15:15',
+    duration: '2h',
     isActive: false,
     geofence: UOM_CSE_COORDS,
   },

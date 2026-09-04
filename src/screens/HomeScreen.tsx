@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { mockStudent, mockAcademicInfo } from '../services/mockData';
@@ -9,7 +9,7 @@ import Skeleton from '../components/Skeleton';
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
-  const { user } = useAuth();
+  const { user, isFaceRegistered } = useAuth();
   const currentStudent = user || mockStudent;
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +68,31 @@ export default function HomeScreen() {
           <Text style={styles.avatarText}>{currentStudent.name ? currentStudent.name.charAt(0) : 'S'}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Warning Banner: Face Biometrics Not Registered */}
+      {!isFaceRegistered && (
+        <View style={styles.warningBanner}>
+          <View style={styles.warningContent}>
+            <View style={styles.warningIconCircle}>
+              <Ionicons name="alert-circle" size={24} color="#D97706" />
+            </View>
+            <View style={styles.warningTextGroup}>
+              <Text style={styles.warningTitle}>Face Biometrics Required</Text>
+              <Text style={styles.warningSubtitle}>
+                You haven't registered your face yet. Biometrics are required to check in to lectures.
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.warningButton}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('FaceRegistration')}
+          >
+            <Ionicons name="camera-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+            <Text style={styles.warningButtonText}>Register Face Now</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Quick Timetable Banner */}
       <TouchableOpacity 
@@ -153,6 +178,17 @@ export default function HomeScreen() {
                   : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)
               ]}
               onPress={() => {
+                if (!isFaceRegistered) {
+                  Alert.alert(
+                    'Biometrics Required',
+                    'You must register your face biometrics before you can check in to class.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Register Now', onPress: () => navigation.navigate('FaceRegistration') },
+                    ]
+                  );
+                  return;
+                }
                 if (session.isCheckInAllowed) {
                   navigation.navigate('LocationCheck', { sessionId: session.id });
                 }
@@ -422,6 +458,60 @@ const styles = StyleSheet.create({
   },
   buttonTextDisabled: {
     color: '#9CA3AF',
-  }
+  },
+  warningBanner: {
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 18,
+    shadowColor: '#D97706',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  warningContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  warningIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FEF3C7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  warningTextGroup: {
+    flex: 1,
+  },
+  warningTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 4,
+  },
+  warningSubtitle: {
+    fontSize: 13,
+    color: '#B45309',
+    lineHeight: 18,
+  },
+  warningButton: {
+    backgroundColor: '#D97706',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  warningButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });
-
