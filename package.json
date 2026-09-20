@@ -33,8 +33,8 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
+    "start": "REACT_NATIVE_PACKAGER_HOSTNAME=localhost expo start",
+    "android": "adb reverse tcp:8081 tcp:8081 2>/dev/null; adb reverse tcp:8000 tcp:8000 2>/dev/null; REACT_NATIVE_PACKAGER_HOSTNAME=localhost expo run:android",
     "android:release": "expo run:android --variant release",
     "build:apk": "cd android && ./gradlew assembleRelease",
     "install:apk": "adb install -r android/app/build/outputs/apk/release/app-release.apk",

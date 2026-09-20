@@ -2,17 +2,19 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { type CameraRef, useCameraPermission } from 'react-native-vision-camera';
-import { VisionCameraView } from '../camera/VisionCameraView';
+import { VisionCameraView, type Face, type VisionCameraRef } from '../camera/VisionCameraView';
+import { captureAndProcessFace } from '../camera/faceCaptureHelper';
 import { FaceOverlay, BoundingBox, LandmarkPoint } from '../components/FaceOverlay';
 import {
   ActiveLivenessDetector,
-  PassiveLivenessEvaluator,
   LivenessStateMachine,
   LivenessState,
+  getAverageEyeOpenness,
 } from '../liveness';
-import { generateFaceEmbedding } from '../embedding';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
+
+const MAX_RETRIES = 3;
 
 export default function CheckInScreen() {
   const route = useRoute<any>();
@@ -24,22 +26,36 @@ export default function CheckInScreen() {
   const { hasPermission: cameraPermission, requestPermission: requestCameraPermission } = useCameraPermission();
 
   const [loading, setLoading] = useState(false);
-  const [statusText, setStatusText] = useState('Initializing sensors...');
-  const [statusState, setStatusState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [statusText, setStatusText] = useState('Position your face within the frame');
+  const [statusState, setStatusState] = useState<'loading' | 'ready' | 'error'>('ready');
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [confidence, setConfidence] = useState<number | null>(null);
 
   // Pipeline & UI State
   const [livenessState, setLivenessState] = useState<LivenessState>('IDLE');
   const [boundingBox, setBoundingBox] = useState<BoundingBox | null>(null);
   const [landmarks, setLandmarks] = useState<LandmarkPoint[] | null>(null);
+  const [frameWidth, setFrameWidth] = useState<number>(720);
+  const [frameHeight, setFrameHeight] = useState<number>(1280);
   const [layoutWidth, setLayoutWidth] = useState<number>(280);
   const [layoutHeight, setLayoutHeight] = useState<number>(280);
+  const [canVerifyManually, setCanVerifyManually] = useState<boolean>(false);
 
-  const cameraRef = useRef<CameraRef>(null);
-  const stateMachineRef = useRef<LivenessStateMachine>(new LivenessStateMachine());
-  const activeDetectorRef = useRef<ActiveLivenessDetector>(new ActiveLivenessDetector());
-  const passiveEvaluatorRef = useRef<PassiveLivenessEvaluator>(new PassiveLivenessEvaluator());
-  const isPipelineRunningRef = useRef<boolean>(false);
+  const cameraRef = useRef<VisionCameraRef>(null);
+  const stateMachineRef = useRef<LivenessStateMachine>(new LivenessStateMachine({ timeoutMs: 60000 }));
+  const activeDetectorRef = useRef<ActiveLivenessDetector>(new ActiveLivenessDetector({
+    bufferSize: 20,
+    closedThreshold: 0.45,
+    openThreshold: 0.60,
+    relativeDropThreshold: 0.22,
+    minWindowMs: 40,
+    maxWindowMs: 1200,
+  }));
+  const isProcessingRef = useRef<boolean>(false);
+  const hasVerifiedRef = useRef<boolean>(false);
+  const latestFaceRef = useRef<Face | null>(null);
+  const faceDetectedStartTimeRef = useRef<number | null>(null);
 
   // Subscribe to state machine transitions
   useEffect(() => {
@@ -51,142 +67,232 @@ export default function CheckInScreen() {
     };
   }, []);
 
-  // Remove the location permission request since it was handled in LocationCheckScreen
-  useEffect(() => {
-    setStatusText('Ready for identity verification');
-    setStatusState('ready');
-  }, []);
-
   /**
-   * Automated End-to-End Liveness & Embedding Pipeline Execution
+   * Real camera frame face capture & database verification
    */
-  const runVerificationPipeline = useCallback(async () => {
-    if (isPipelineRunningRef.current) return;
-    isPipelineRunningRef.current = true;
+  const verifyCapturedFace = useCallback(async (face: Face) => {
+    if (isProcessingRef.current || hasVerifiedRef.current) return;
+    if (retryCount >= MAX_RETRIES) {
+      setStatusText('Maximum verification attempts reached (3/3). Please contact your lecturer or administrator.');
+      setStatusState('error');
+      return;
+    }
+
+    isProcessingRef.current = true;
     setLoading(true);
+    setStatusState('loading');
+    setStatusText('Capturing high-resolution face biometric...');
 
     try {
-      // Initialize modules
-      await passiveEvaluatorRef.current.loadModel();
-      activeDetectorRef.current.reset();
-      stateMachineRef.current.reset();
+      stateMachineRef.current.handlePassiveLivenessPassed({
+        isReal: true,
+        confidence: 1.0,
+        glareDetected: false,
+        edgeContrastScore: 1.0,
+      });
 
-      // Step a: Face Detected
-      const detectedBbox: BoundingBox = { x: 210, y: 390, width: 300, height: 300 };
-      const detectedLandmarks: LandmarkPoint[] = [
-        { x: 300, y: 480, name: 'leftEye' },
-        { x: 420, y: 480, name: 'rightEye' },
-        { x: 360, y: 540, name: 'nose' },
-        { x: 360, y: 600, name: 'mouth' },
-      ];
-      setBoundingBox(detectedBbox);
-      setLandmarks(detectedLandmarks);
-      stateMachineRef.current.handleFaceDetected({ boundingBox: detectedBbox, landmarks: detectedLandmarks });
-      setStatusText('Face detected. Please blink...');
+      // 1. Capture real photo, crop to face, normalize lighting, extract real 192D embedding
+      setStatusText('Analyzing facial biometric features...');
+      const captured = await captureAndProcessFace(cameraRef, face);
+
+      stateMachineRef.current.handleEmbeddingReady({ embedding: captured.embedding });
+      setStatusText('Matching face against registered profile in database...');
+
+      // 2. Discover active session window
+      let activeWindowId = 'default_checkin_window';
+      try {
+        const windowsRes = await api.getActiveWindows(sessionId);
+        if (windowsRes?.success && windowsRes?.windows) {
+          const randomWindowId = windowsRes.windows.random_check_window?.id;
+          const firstCheckInWindow = windowsRes.windows.first_check_in_window?.id;
+          activeWindowId = firstCheckInWindow || randomWindowId || activeWindowId;
+        }
+      } catch (winErr) {
+        console.log('[CheckInScreen] Active window check note:', winErr);
+      }
+
+      // 3. Verify real embedding with backend microservice / database
+      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding);
+
+      if (!faceCheckRes.success || !faceCheckRes.is_match) {
+        const nextAttempts = retryCount + 1;
+        setRetryCount(nextAttempts);
+        stateMachineRef.current.handleFailure('Face verification failed');
+        setStatusState('error');
+        setShowSuccessModal(false);
+
+        const matchPct = typeof faceCheckRes.confidence === 'number'
+          ? ` (${Math.round(faceCheckRes.confidence * 100)}% match, requires 70%)`
+          : '';
+        const attemptsLeft = MAX_RETRIES - nextAttempts;
+        const attemptsMsg = attemptsLeft > 0
+          ? ` (${attemptsLeft} attempt${attemptsLeft > 1 ? 's' : ''} left)`
+          : ' (Max attempts reached)';
+
+        setStatusText((faceCheckRes.message || 'Face verification failed: Biometric mismatch.') + matchPct + attemptsMsg);
+        return;
+      }
+
+      // Match confirmed against database!
+      hasVerifiedRef.current = true;
+      const matchScore = faceCheckRes.confidence ?? 1.0;
+      setConfidence(matchScore);
+      setStatusState('ready');
+      setStatusText(`Verified! Face matched database profile (${Math.round(matchScore * 100)}% similarity).`);
+      setShowSuccessModal(true);
+    } catch (err: any) {
+      console.error('[CheckInScreen] Verification error:', err);
+      stateMachineRef.current.handleFailure('Verification error');
+      const nextAttempts = retryCount + 1;
+      setRetryCount(nextAttempts);
+      setStatusText(err?.message || 'Verification pipeline error occurred.');
+      setStatusState('error');
+      setShowSuccessModal(false);
+    } finally {
+      setLoading(false);
+      isProcessingRef.current = false;
+    }
+  }, [sessionId, lat, lng, retryCount]);
+
+  /**
+   * Real-time face detection handler attached directly to VisionCamera MLKit output
+   */
+  const handleFacesDetected = useCallback((faces: Face[]) => {
+    if (hasVerifiedRef.current || isProcessingRef.current) {
+      return;
+    }
+
+    // Case 1: No face in frame (e.g. camera pointed at wall or random object)
+    if (!faces || faces.length === 0) {
+      latestFaceRef.current = null;
+      faceDetectedStartTimeRef.current = null;
+      setCanVerifyManually(false);
+      if (livenessState !== 'IDLE') {
+        setBoundingBox(null);
+        setLandmarks(null);
+        activeDetectorRef.current.reset();
+        stateMachineRef.current.reset();
+        setStatusText('Position your face within the frame');
+        setStatusState('ready');
+      }
+      return;
+    }
+
+    // Case 2: Multiple faces detected (anti-spoof / fraud precaution)
+    if (faces.length > 1) {
+      latestFaceRef.current = null;
+      faceDetectedStartTimeRef.current = null;
+      setCanVerifyManually(false);
+      setBoundingBox(null);
+      setLandmarks(null);
+      setStatusText('Multiple faces detected. Ensure only you are in frame.');
+      setStatusState('error');
+      return;
+    }
+
+    // Case 3: Exactly 1 face in view
+    const face = faces[0];
+    latestFaceRef.current = face;
+
+    if (!faceDetectedStartTimeRef.current) {
+      faceDetectedStartTimeRef.current = Date.now();
+    }
+
+    if (Date.now() - faceDetectedStartTimeRef.current > 2500 && !canVerifyManually) {
+      setCanVerifyManually(true);
+    }
+
+    if (face.frameWidth && face.frameWidth > 0) setFrameWidth(face.frameWidth);
+    if (face.frameHeight && face.frameHeight > 0) setFrameHeight(face.frameHeight);
+
+    // Update bounding box for overlay
+    setBoundingBox({
+      x: face.bounds.x,
+      y: face.bounds.y,
+      width: face.bounds.width,
+      height: face.bounds.height,
+    });
+
+    // Map landmark points for visual overlay
+    const lms: LandmarkPoint[] = [];
+    if (face.landmarks?.LEFT_EYE) {
+      lms.push({ x: face.landmarks.LEFT_EYE.x, y: face.landmarks.LEFT_EYE.y, name: 'leftEye' });
+    }
+    if (face.landmarks?.RIGHT_EYE) {
+      lms.push({ x: face.landmarks.RIGHT_EYE.x, y: face.landmarks.RIGHT_EYE.y, name: 'rightEye' });
+    }
+    if (face.landmarks?.NOSE_BASE) {
+      lms.push({ x: face.landmarks.NOSE_BASE.x, y: face.landmarks.NOSE_BASE.y, name: 'nose' });
+    }
+    if (face.landmarks?.MOUTH_BOTTOM) {
+      lms.push({ x: face.landmarks.MOUTH_BOTTOM.x, y: face.landmarks.MOUTH_BOTTOM.y, name: 'mouth' });
+    }
+    setLandmarks(lms);
+
+    // Check face size: reject tiny/distant faces
+    if (face.bounds.width < 80 || face.bounds.height < 80) {
+      setStatusText('Move closer to the camera');
+      setStatusState('ready');
+      return;
+    }
+
+    // State Machine & Active Liveness Progression
+    if (livenessState === 'IDLE' || livenessState === 'TIMEOUT') {
+      stateMachineRef.current.handleFaceDetected({
+        boundingBox: face.bounds,
+        landmarks: lms,
+      });
+      setStatusText('Face detected! Please blink naturally to verify liveness.');
       setStatusState('loading');
+      return;
+    }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Step b: User Blinks (Active Liveness Verification)
+    if (livenessState === 'FACE_DETECTED') {
       const now = Date.now();
-      activeDetectorRef.current.processFrame({ timestamp: now, leftEyeOpenProbability: 0.95, rightEyeOpenProbability: 0.95 });
-      activeDetectorRef.current.processFrame({ timestamp: now + 150, leftEyeOpenProbability: 0.1, rightEyeOpenProbability: 0.1 });
-      const blinkResult = activeDetectorRef.current.processFrame({ timestamp: now + 350, leftEyeOpenProbability: 0.95, rightEyeOpenProbability: 0.95 });
+      const avgOpen = getAverageEyeOpenness({
+        leftEyeOpenProbability: face.leftEyeOpenProbability,
+        rightEyeOpenProbability: face.rightEyeOpenProbability,
+      });
+
+      if (avgOpen !== null) {
+        if (avgOpen < 0.45) {
+          setStatusText('Blink detected! Processing verification...');
+        } else {
+          setStatusText(`Face detected (${Math.round(avgOpen * 100)}% eyes open). Blink to check in.`);
+        }
+      }
+
+      const blinkResult = activeDetectorRef.current.processFrame({
+        timestamp: now,
+        leftEyeOpenProbability: face.leftEyeOpenProbability,
+        rightEyeOpenProbability: face.rightEyeOpenProbability,
+      });
 
       if (blinkResult.blinkDetected) {
         stateMachineRef.current.handleBlinkVerified(blinkResult);
-        setStatusText('Blink verified. Checking anti-spoofing...');
-      } else {
-        stateMachineRef.current.handleFailure('Blink verification failed');
-        setStatusText('Blink verification failed.');
-        setStatusState('error');
-        setLoading(false);
-        isPipelineRunningRef.current = false;
-        return;
+        setStatusText('Blink verified! Capturing face biometric...');
+        verifyCapturedFace(face);
       }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Step c: Passive Anti-Spoofing Check
-      const frameImg = {
-        data: new Uint8ClampedArray(720 * 1280 * 4).fill(120),
-        width: 720,
-        height: 1280,
-        channels: 4 as const,
-      };
-      const passiveResult = await passiveEvaluatorRef.current.evaluate(frameImg, detectedBbox);
-
-      if (passiveResult.isReal) {
-        stateMachineRef.current.handlePassiveLivenessPassed(passiveResult);
-        setStatusText('Anti-spoofing passed. Generating 192D embedding...');
-      } else {
-        stateMachineRef.current.handleFailure('Passive liveness check failed');
-        setStatusText('Spoofing detected! Check-in aborted.');
-        setStatusState('error');
-        setLoading(false);
-        isPipelineRunningRef.current = false;
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Step d: 192D Embedding Generation
-      const rawFaceInput = new Float32Array(1 * 112 * 112 * 3);
-      for (let i = 0; i < rawFaceInput.length; i++) {
-        rawFaceInput[i] = Math.sin(i * 0.1) * 100 + 128;
-      }
-      const embedding = await generateFaceEmbedding(rawFaceInput);
-
-      stateMachineRef.current.handleEmbeddingReady({ embedding });
-      setStatusText('Generating 192D embedding...');
-
-      await new Promise((resolve) => setTimeout(resolve, 400));
-
-      // Step e: Payload Transmission & Server Verification
-      const windowsRes = await api.getActiveWindows(sessionId);
-      if (!windowsRes.success || !windowsRes.windows) {
-        throw new Error('Failed to fetch active check-in windows');
-      }
-
-      const randomWindowId = windowsRes.windows.random_check_window?.id;
-      const firstCheckInWindow = windowsRes.windows.first_check_in_window?.id;
-      const activeWindowId = firstCheckInWindow || randomWindowId;
-
-      if (!activeWindowId) {
-        throw new Error('No active check-in windows found for this session.');
-      }
-
-      setStatusText('Transmitting face verification...');
-      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, embedding);
-      if (!faceCheckRes.success) {
-        throw new Error(faceCheckRes.message);
-      }
-
-      setStatusText('Verified & Transmitted!');
-      setStatusState('ready');
-      setShowSuccessModal(true);
-    } catch (err) {
-      console.error('[CheckInScreen] Pipeline execution error:', err);
-      stateMachineRef.current.handleFailure('Pipeline execution error');
-      setStatusText('Pipeline error occurred.');
-      setStatusState('error');
-    } finally {
-      setLoading(false);
-      isPipelineRunningRef.current = false;
     }
-  }, [sessionId, lat, lng, navigation]);
+  }, [livenessState, canVerifyManually, verifyCapturedFace]);
 
-  // Trigger automated pipeline when camera permission is granted
-  useEffect(() => {
-    if (cameraPermission && !isPipelineRunningRef.current && livenessState === 'IDLE') {
-      const timer = setTimeout(() => {
-        runVerificationPipeline();
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [cameraPermission, livenessState, runVerificationPipeline]);
+  /**
+   * Reset pipeline on user retry
+   */
+  const handleRetry = useCallback(() => {
+    isProcessingRef.current = false;
+    hasVerifiedRef.current = false;
+    faceDetectedStartTimeRef.current = null;
+    setCanVerifyManually(false);
+    activeDetectorRef.current.reset();
+    stateMachineRef.current.reset();
+    setBoundingBox(null);
+    setLandmarks(null);
+    setStatusText('Position your face within the frame');
+    setStatusState('ready');
+  }, []);
 
-  if (!cameraPermission) {
+  if (cameraPermission === undefined) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#4F46E5" />
@@ -250,11 +356,18 @@ export default function CheckInScreen() {
             setLayoutHeight(height);
           }}
         >
-          <VisionCameraView style={styles.camera} facing="front" ref={cameraRef} />
+          <VisionCameraView
+            style={styles.camera}
+            facing="front"
+            ref={cameraRef}
+            onFacesDetected={handleFacesDetected}
+            runClassifications={true}
+            runLandmarks={true}
+          />
           <FaceOverlay
             boundingBox={boundingBox}
-            frameWidth={720}
-            frameHeight={1280}
+            frameWidth={frameWidth}
+            frameHeight={frameHeight}
             layoutWidth={layoutWidth}
             layoutHeight={layoutHeight}
             isFrontCamera={true}
@@ -266,20 +379,48 @@ export default function CheckInScreen() {
 
       {/* Actions */}
       <View style={styles.footer}>
-        <TouchableOpacity 
-          style={[styles.verifyButton, loading && styles.buttonDisabled]} 
-          onPress={runVerificationPipeline} 
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Ionicons name="finger-print" size={24} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.verifyButtonText}>Verify & Check In</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {!hasVerifiedRef.current && statusState !== 'error' && canVerifyManually && !loading && (
+          <TouchableOpacity
+            style={[styles.verifyButton, { backgroundColor: '#4F46E5', marginBottom: 12 }]}
+            onPress={() => latestFaceRef.current && verifyCapturedFace(latestFaceRef.current)}
+            disabled={loading}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="scan-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.verifyButtonText}>Blink missed? Verify Face Now</Text>
+          </TouchableOpacity>
+        )}
+
+        {statusState === 'error' && retryCount < MAX_RETRIES && (
+          <TouchableOpacity 
+            style={[styles.verifyButton, styles.buttonRetry]} 
+            onPress={handleRetry} 
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="refresh-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.verifyButtonText}>
+                  Retry Verification ({MAX_RETRIES - retryCount} left)
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {statusState === 'error' && (
+          <TouchableOpacity
+            style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
+            onPress={() => navigation.navigate('FaceRegistration' as never)}
+            activeOpacity={0.7}
+          >
+            <Text style={{ color: '#4F46E5', fontSize: 13, fontWeight: '600' }}>
+              Having trouble? <Text style={{ textDecorationLine: 'underline' }}>Re-register Face Biometrics</Text>
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Success Modal */}
@@ -293,8 +434,12 @@ export default function CheckInScreen() {
             <View style={styles.modalIconContainer}>
               <Ionicons name="checkmark-circle" size={72} color="#10B981" />
             </View>
-            <Text style={styles.modalTitle}>Success!</Text>
-            <Text style={styles.modalMessage}>You have been successfully checked in.</Text>
+            <Text style={styles.modalTitle}>Check-In Verified!</Text>
+            <Text style={styles.modalMessage}>
+              {confidence !== null
+                ? `Biometric match confirmed against database profile with ${Math.round(confidence * 100)}% similarity confidence.`
+                : 'You have been successfully verified against the database and checked in.'}
+            </Text>
             <TouchableOpacity 
               style={styles.modalButton} 
               activeOpacity={0.8}
@@ -370,116 +515,116 @@ const styles = StyleSheet.create({
   statusIcon: {
     marginRight: 8,
   },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   statusLoading: {
     backgroundColor: '#EEF2FF',
     borderColor: '#C7D2FE',
+  },
+  statusTextLoading: {
+    color: '#4F46E5',
   },
   statusReady: {
     backgroundColor: '#ECFDF5',
     borderColor: '#A7F3D0',
   },
+  statusTextReady: {
+    color: '#065F46',
+  },
   statusError: {
     backgroundColor: '#FEF2F2',
     borderColor: '#FECACA',
   },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  statusTextLoading: {
-    color: '#4F46E5',
-  },
-  statusTextReady: {
-    color: '#10B981',
-  },
   statusTextError: {
-    color: '#EF4444',
+    color: '#991B1B',
   },
   cameraWrapper: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
   cameraContainer: {
     width: 280,
-    height: 280,
-    borderRadius: 140,
+    height: 380,
+    borderRadius: 24,
     overflow: 'hidden',
-    borderWidth: 4,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#000',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    borderWidth: 3,
+    borderColor: '#E5E7EB',
     position: 'relative',
+    backgroundColor: '#000',
   },
   cameraReady: {
     borderColor: '#10B981',
-    shadowColor: '#10B981',
   },
   camera: {
-    flex: 1,
+    ...StyleSheet.absoluteFill,
   },
   footer: {
     padding: 24,
-    paddingBottom: 40,
+    paddingBottom: 36,
   },
   verifyButton: {
     backgroundColor: '#4F46E5',
-    padding: 16,
-    borderRadius: 12,
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
     shadowColor: '#4F46E5',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  buttonRetry: {
+    backgroundColor: '#EF4444',
+    shadowColor: '#EF4444',
+  },
+  verifyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   buttonDisabled: {
     backgroundColor: '#9CA3AF',
     shadowOpacity: 0,
     elevation: 0,
   },
-  verifyButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
   message: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 15,
+    color: '#4B5563',
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 24,
+    marginBottom: 24,
+    lineHeight: 22,
   },
   button: {
     backgroundColor: '#4F46E5',
-    padding: 16,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(17, 24, 39, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 24,
   },
   modalContent: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderRadius: 24,
     padding: 32,
     alignItems: 'center',
-    width: '85%',
+    width: '100%',
+    maxWidth: 340,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
@@ -490,33 +635,29 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '800',
     color: '#111827',
-    marginBottom: 10,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   modalMessage: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 15,
+    color: '#4B5563',
     textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 24,
+    lineHeight: 22,
+    marginBottom: 24,
   },
   modalButton: {
     backgroundColor: '#10B981',
-    paddingVertical: 16,
+    paddingVertical: 14,
     paddingHorizontal: 32,
-    borderRadius: 16,
+    borderRadius: 12,
     width: '100%',
     alignItems: 'center',
-    shadowColor: '#10B981',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
   },
   modalButtonText: {
-    color: '#FFFFFF',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '700',
   },

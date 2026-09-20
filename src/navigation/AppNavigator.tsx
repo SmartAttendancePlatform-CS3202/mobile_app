@@ -100,7 +100,16 @@ export default function AppNavigator() {
               headerTitleStyle: { fontWeight: 'bold' },
             }}
           >
-            {() => <OnboardingScreen onSuccess={() => setFaceRegistered(true)} />}
+            {({ navigation }: any) => (
+              <OnboardingScreen
+                onSuccess={() => {
+                  setFaceRegistered(true);
+                  if (navigation.canGoBack()) {
+                    navigation.goBack();
+                  }
+                }}
+              />
+            )}
           </Stack.Screen>
           <Stack.Screen
             name="LocationCheck"

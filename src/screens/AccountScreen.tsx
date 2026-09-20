@@ -71,7 +71,10 @@ export default function AccountScreen() {
     setShowFaceRegModal(false);
     await setFaceRegistered(true);
     await refreshProfile();
-    Alert.alert('Face Registered', 'Your facial biometrics have been successfully registered in the database.');
+    Alert.alert(
+      'Face Biometrics Saved',
+      'Your facial biometrics have been successfully updated in the database.'
+    );
   };
 
   // Helper function to render a dash ("—") if a database field is null or empty
@@ -348,12 +351,22 @@ export default function AccountScreen() {
               </View>
 
               {isFaceRegistered ? (
-                /* One-time rule notice: cannot re-register directly, must contact lecturer/admin */
-                <View style={styles.lockedNoticeBox}>
-                  <Ionicons name="lock-closed" size={15} color="#4B5563" style={{ marginRight: 8 }} />
-                  <Text style={styles.lockedNoticeText}>
-                    Biometric profile is active and locked. If you need to update or reset your face verification, please contact your lecturer or department administrator.
-                  </Text>
+                /* Unlocked for testing: allow re-registering face biometrics directly */
+                <View style={{ marginTop: 14 }}>
+                  <TouchableOpacity
+                    style={styles.actionButtonSecondary}
+                    onPress={() => setShowFaceRegModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="refresh-circle" size={20} color="#4F46E5" style={{ marginRight: 8 }} />
+                    <Text style={styles.actionButtonSecondaryText}>Re-register Face Biometrics</Text>
+                  </TouchableOpacity>
+                  <View style={styles.unlockedNoticeBox}>
+                    <Ionicons name="flask-outline" size={15} color="#6366F1" style={{ marginRight: 6 }} />
+                    <Text style={styles.unlockedNoticeText}>
+                      Testing Mode: Biometric re-registration is unlocked. Capturing a new face will update your active database profile.
+                    </Text>
+                  </View>
                 </View>
               ) : (
                 /* Not registered: show the register face button */
@@ -471,10 +484,14 @@ export default function AccountScreen() {
             >
               <Ionicons name="arrow-back" size={24} color="#111827" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Face Biometrics Registration</Text>
+            <Text style={styles.modalTitle}>
+              {isFaceRegistered ? 'Re-register Face Biometrics' : 'Face Biometrics Registration'}
+            </Text>
             <View style={{ width: 32 }} />
           </View>
-          <OnboardingScreen onSuccess={handleFaceRegSuccess} />
+          {showFaceRegModal && (
+            <OnboardingScreen onSuccess={handleFaceRegSuccess} />
+          )}
         </View>
       </Modal>
     </View>
@@ -820,6 +837,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  actionButtonSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+  },
+  actionButtonSecondaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  unlockedNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F3FF',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+  },
+  unlockedNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#6D28D9',
+    fontWeight: '500',
+    lineHeight: 16,
   },
   footerWrap: {
     alignItems: 'center',
