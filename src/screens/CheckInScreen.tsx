@@ -91,9 +91,9 @@ export default function CheckInScreen() {
         edgeContrastScore: 1.0,
       });
 
-      // 1. Capture real photo, crop to face, normalize lighting, extract real 192D embedding
+      // 1. Capture real photo, crop to face with front-camera mirroring, extract real 192D RGB embedding
       setStatusText('Analyzing facial biometric features...');
-      const captured = await captureAndProcessFace(cameraRef, face);
+      const captured = await captureAndProcessFace(cameraRef, face, true);
 
       stateMachineRef.current.handleEmbeddingReady({ embedding: captured.embedding });
       setStatusText('Matching face against registered profile in database...');
@@ -115,6 +115,12 @@ export default function CheckInScreen() {
       const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding);
 
       if (!faceCheckRes.success || !faceCheckRes.is_match) {
+        if (faceCheckRes.requires_re_registration) {
+          setStatusState('error');
+          setStatusText(faceCheckRes.message || 'Legacy biometric profile detected. Please re-register your face.');
+          return;
+        }
+
         const nextAttempts = retryCount + 1;
         setRetryCount(nextAttempts);
         stateMachineRef.current.handleFailure('Face verification failed');

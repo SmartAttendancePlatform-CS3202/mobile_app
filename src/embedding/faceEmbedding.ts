@@ -1,4 +1,5 @@
 import { loadTensorflowModel, TfliteModel } from 'react-native-fast-tflite';
+import { Asset } from 'expo-asset';
 
 export interface ImageBuffer {
   data: Uint8Array | Uint8ClampedArray;
@@ -13,6 +14,7 @@ let modelInstance: TfliteModel | null = null;
 
 /**
  * Loads the MobileFaceNet TFLite model using react-native-fast-tflite.
+ * Resolves local file URI using expo-asset to ensure reliable Android APK loading.
  */
 export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
   if (modelInstance) {
@@ -20,15 +22,42 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
   }
 
   try {
-    // Attempt loading native TFLite model asset
-    const modelAsset = require('../../assets/models/mobilefacenet.tflite');
-    modelInstance = await loadTensorflowModel(modelAsset, []);
+    const modelModule = require('../../assets/models/mobilefacenet.tflite');
+    let modelSource: any = modelModule;
+
+    try {
+      const assets = await Asset.loadAsync(modelModule);
+      if (assets && assets[0]) {
+        const resolvedUri = assets[0].localUri || assets[0].uri;
+        if (resolvedUri) {
+          modelSource = { url: resolvedUri };
+          console.log('[Embedding] Resolved MobileFaceNet asset URI:', resolvedUri);
+        }
+      }
+    } catch (assetErr) {
+      console.warn('[Embedding] expo-asset resolution fallback note:', assetErr);
+    }
+
+    modelInstance = await loadTensorflowModel(modelSource, []);
+    console.log('[Embedding] MobileFaceNet TFLite model loaded successfully via native engine.');
     return modelInstance;
-  } catch (error) {
-    console.warn('[Embedding] Native TFLite model load failed or running in mock/test environment. Using fallback model handler.', error);
-    // Provide fallback model for test/non-native environments
-    modelInstance = createMockTfliteModel();
-    return modelInstance;
+  } catch (error: any) {
+    console.error('[Embedding] Native MobileFaceNet TFLite model load FAILED:', {
+      message: error?.message,
+      stack: error?.stack,
+      nativeError: error,
+    });
+
+    // Only allow mock fallback in automated headless test runners (e.g. Jest)
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
+      console.warn('[Embedding] Running in test environment; using fallback mock model handler.');
+      modelInstance = createMockTfliteModel();
+      return modelInstance;
+    }
+
+    throw new Error(
+      `Face recognition neural network could not be loaded on this device: ${error?.message || 'Native TFLite initialization failure'}`
+    );
   }
 }
 

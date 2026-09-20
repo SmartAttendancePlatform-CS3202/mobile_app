@@ -107,7 +107,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
 
     try {
       setPoseInstruction(`Capturing ${targetPose} pose... hold still`);
-      const captured = await captureAndProcessFace(cameraRef, face);
+      const captured = await captureAndProcessFace(cameraRef, face, true);
 
       capturedEmbeddingsRef.current.push(captured.embedding);
 
@@ -148,7 +148,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
           capture_timestamp: new Date().toISOString(),
           lighting_normalized: true,
           depth_dimensions: finalDepth.length,
-          version: 2,
+          version: 3,
         };
 
         const regResponse = await api.registerFace(

@@ -1,7 +1,7 @@
 import { RefObject } from 'react';
 import type { Face } from 'react-native-vision-camera-face-detector';
 import { loadImage, type Image } from 'react-native-nitro-image';
-import { LightingNormalizer } from '../enrollment/lightingNormalization';
+// Removed LightingNormalizer import to preserve true RGB color features for MobileFaceNet
 import { DepthEstimator, FaceLandmarksInput } from '../enrollment/depthEstimation';
 import { generateFaceEmbedding } from '../embedding';
 
@@ -19,12 +19,13 @@ export interface CaptureCapableRef {
 }
 
 /**
- * Captures a real photo via VisionCamera, crops to face bounds using NitroImage,
- * normalizes lighting, and extracts real 192D MobileFaceNet embedding and 48D depth vector.
+ * Captures a real photo via VisionCamera, crops to face bounds with square geometry and front-camera mirroring,
+ * applies canonical RGB float normalization, and extracts real 192D MobileFaceNet embedding and 48D depth vector.
  */
 export async function captureAndProcessFace(
   cameraRef: RefObject<CaptureCapableRef | null>,
-  face?: Face | null
+  face?: Face | null,
+  isFrontCamera: boolean = true
 ): Promise<FaceCaptureResult> {
   if (!cameraRef.current) {
     throw new Error('Camera reference is not initialized');
@@ -62,7 +63,7 @@ export async function captureAndProcessFace(
   const photoW = img.width;
   const photoH = img.height;
 
-  // 2. Compute crop bounds scaled to photo resolution
+  // 2. Compute crop bounds scaled to photo resolution with front camera mirroring
   let startX = 0;
   let startY = 0;
   let endX = photoW;
@@ -75,19 +76,24 @@ export async function captureAndProcessFace(
     const scaleX = photoW / frameW;
     const scaleY = photoH / frameH;
 
-    const rawX = face.bounds.x * scaleX;
+    // Front camera photos on Android (HybridPhoto.toImage) are horizontally mirrored.
+    // MLKit face.bounds.x is in unmirrored sensor space, so mirror it when isFrontCamera is true.
+    const rawX = isFrontCamera
+      ? photoW - (face.bounds.x * scaleX + face.bounds.width * scaleX)
+      : face.bounds.x * scaleX;
     const rawY = face.bounds.y * scaleY;
     const rawW = face.bounds.width * scaleX;
     const rawH = face.bounds.height * scaleY;
 
-    // Add a 15% margin around the face to preserve chin, forehead, and hair boundary
-    const padX = rawW * 0.15;
-    const padY = rawH * 0.15;
+    // Use a square bounding box centered on the face with 20% margin to prevent non-uniform aspect distortion
+    const centerX = rawX + rawW / 2;
+    const centerY = rawY + rawH / 2;
+    const side = Math.max(rawW, rawH) * 1.20;
 
-    startX = Math.max(0, Math.floor(rawX - padX));
-    startY = Math.max(0, Math.floor(rawY - padY));
-    endX = Math.min(photoW, Math.ceil(rawX + rawW + padX));
-    endY = Math.min(photoH, Math.ceil(rawY + rawH + padY));
+    startX = Math.max(0, Math.floor(centerX - side / 2));
+    startY = Math.max(0, Math.floor(centerY - side / 2));
+    endX = Math.min(photoW, Math.ceil(centerX + side / 2));
+    endY = Math.min(photoH, Math.ceil(centerY + side / 2));
   } else {
     // Center square crop if no explicit bounds
     const side = Math.min(photoW, photoH);
@@ -97,8 +103,8 @@ export async function captureAndProcessFace(
     endY = startY + side;
   }
 
-  const cropW = endX - startX;
-  const cropH = endY - startY;
+  const cropW = Math.max(1, endX - startX);
+  const cropH = Math.max(1, endY - startY);
 
   const cropped = (cropW > 20 && cropH > 20 && (cropW !== photoW || cropH !== photoH))
     ? img.crop(startX, startY, endX, endY)
@@ -119,32 +125,40 @@ export async function captureAndProcessFace(
     rgb[j + 2] = isBgra ? rawBytes[i] : rawBytes[i + 2];     // Blue
   }
 
-  // 5. Lighting normalization
-  const normalizedRgb = LightingNormalizer.normalizeRgbFace(rgb, 112, 112);
+  // 5. Canonical MobileFaceNet RGB float normalization: (pixel - 127.5) / 128.0
+  // Preserves true RGB skin/lip/eye color gradients for high discrimination
+  const normalizedRgb = new Float32Array(112 * 112 * 3);
+  for (let i = 0; i < rgb.length; i++) {
+    normalizedRgb[i] = (rgb[i] - 127.5) / 128.0;
+  }
 
   // 6. Extract real 192D MobileFaceNet embedding
   const embedding = await generateFaceEmbedding(normalizedRgb);
 
-  // 7. Extract real 48D depth & topology features
+  // 7. Extract real 48D depth & topology features (using luminance derived from natural RGB)
   const gray = new Uint8Array(112 * 112);
   for (let p = 0; p < gray.length; p++) {
     gray[p] = Math.round(
-      0.299 * normalizedRgb[p * 3] +
-      0.587 * normalizedRgb[p * 3 + 1] +
-      0.114 * normalizedRgb[p * 3 + 2]
+      0.299 * rgb[p * 3] +
+      0.587 * rgb[p * 3 + 1] +
+      0.114 * rgb[p * 3 + 2]
     );
   }
 
   // Map landmarks to 112x112 face crop coordinates
   let mappedLandmarks: FaceLandmarksInput | undefined;
   if (face?.landmarks && face.bounds && cropW > 0 && cropH > 0) {
-    const scaleX = (photoW / (face.frameWidth || photoW));
-    const scaleY = (photoH / (face.frameHeight || photoH));
+    const frameW = face.frameWidth || photoW;
+    const frameH = face.frameHeight || photoH;
+    const scaleX = (photoW / frameW);
+    const scaleY = (photoH / frameH);
 
     const mapPoint = (p?: { x: number; y: number }) => {
       if (!p) return undefined;
-      const px = p.x * scaleX - startX;
-      const py = p.y * scaleY - startY;
+      const lx = isFrontCamera ? photoW - (p.x * scaleX) : p.x * scaleX;
+      const ly = p.y * scaleY;
+      const px = lx - startX;
+      const py = ly - startY;
       return {
         x: Math.max(0, Math.min(112, (px / cropW) * 112)),
         y: Math.max(0, Math.min(112, (py / cropH) * 112)),

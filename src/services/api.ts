@@ -246,7 +246,7 @@ class ApiService {
               pose_embeddings: posesArray || null,
               depth_features: depthFeatures || null,
               enrollment_metadata: enrollmentMetadata || null,
-              enrollment_version: 2,
+              enrollment_version: 3,
               reference_photo_url: `https://storage.example.com/faces/${studentId}.jpg`,
               quality_score: qualityScore,
               is_active: true,
@@ -342,7 +342,14 @@ class ApiService {
     lat?: number,
     lng?: number,
     faceEmbedding?: Float32Array | number[]
-  ): Promise<{ success: boolean; is_match?: boolean; confidence?: number; message: string; data?: any }> {
+  ): Promise<{
+    success: boolean;
+    is_match?: boolean;
+    confidence?: number;
+    message: string;
+    data?: any;
+    requires_re_registration?: boolean;
+  }> {
     if (!faceEmbedding) {
       return { success: false, is_match: false, message: 'No face biometric embedding provided' };
     }
@@ -365,7 +372,8 @@ class ApiService {
         success: isMatch,
         is_match: isMatch,
         confidence: resData?.confidence,
-        message: resData?.message || (isMatch ? 'Face verified successfully' : 'Face verification failed'),
+        requires_re_registration: Boolean(resData?.requires_re_registration),
+        message: resData?.message || (isMatch ? 'Face verification successful' : 'Biometric mismatch with registered profile'),
         data: resData,
       };
     } catch (error: any) {
@@ -403,6 +411,17 @@ class ApiService {
           success: false,
           is_match: false,
           message: 'No active face biometric profile registered for student in database. Please register your face first.',
+        };
+      }
+
+      // Check for legacy biometric profile (< v3)
+      const enrollmentVersion = Number(profile.enrollment_version || 1);
+      if (enrollmentVersion < 3) {
+        return {
+          success: false,
+          is_match: false,
+          requires_re_registration: true,
+          message: 'Biometric profile upgrade required. Please re-register your face.',
         };
       }
 
