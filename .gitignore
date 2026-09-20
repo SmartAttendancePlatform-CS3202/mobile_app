@@ -39,5 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
-
 AGENTS.md
+agents.md
+.agents/

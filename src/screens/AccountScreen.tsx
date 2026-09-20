@@ -8,11 +8,11 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
-import { mockAcademicInfo, mockStudent } from '../services/mockData';
 import LoginScreen from './LoginScreen';
 import OnboardingScreen from './OnboardingScreen';
 
@@ -23,15 +23,22 @@ export default function AccountScreen() {
     isAuthenticated,
     isFaceRegistered,
     logout,
-    login,
+    refreshProfile,
     setFaceRegistered,
     loading: authLoading,
   } = useAuth();
 
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showFaceRegModal, setShowFaceRegModal] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
-  const currentStudent = user || mockStudent;
+  const currentStudent = user;
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refreshProfile();
+    setRefreshing(false);
+  };
 
   const handleSignOutPress = () => {
     Alert.alert(
@@ -63,7 +70,48 @@ export default function AccountScreen() {
   const handleFaceRegSuccess = async () => {
     setShowFaceRegModal(false);
     await setFaceRegistered(true);
-    Alert.alert('Face Registered', 'Your facial biometrics have been successfully updated.');
+    await refreshProfile();
+    Alert.alert(
+      'Face Biometrics Saved',
+      'Your facial biometrics have been successfully updated in the database.'
+    );
+  };
+
+  // Helper function to render a dash ("—") if a database field is null or empty
+  const val = (v?: string | number | null) => {
+    if (v !== undefined && v !== null && String(v).trim() !== '') {
+      return String(v);
+    }
+    return '—';
+  };
+
+  const getStatusBadge = (status?: string) => {
+    const s = (status || 'active').toLowerCase();
+    if (s === 'active') {
+      return {
+        label: 'Active Student',
+        bg: '#ECFDF5',
+        text: '#059669',
+        dot: '#10B981',
+        border: '#A7F3D0',
+      };
+    }
+    if (s === 'pending_approval' || s === 'pending') {
+      return {
+        label: 'Pending Approval',
+        bg: '#FFFBEB',
+        text: '#D97706',
+        dot: '#F59E0B',
+        border: '#FDE68A',
+      };
+    }
+    return {
+      label: s.charAt(0).toUpperCase() + s.slice(1),
+      bg: '#FEF2F2',
+      text: '#DC2626',
+      dot: '#EF4444',
+      border: '#FECACA',
+    };
   };
 
   if (authLoading) {
@@ -74,12 +122,19 @@ export default function AccountScreen() {
     );
   }
 
+  const statusBadge = getStatusBadge(currentStudent?.status);
+  const roleDisplay = currentStudent?.role
+    ? currentStudent.role === 'student'
+      ? 'Undergraduate Student'
+      : currentStudent.role.charAt(0).toUpperCase() + currentStudent.role.slice(1)
+    : 'Undergraduate Student';
+
   return (
     <View style={styles.container}>
-      {/* Top Header with Dynamic Sign In / Sign Out Button */}
+      {/* Top Header */}
       <View style={styles.topHeader}>
         <View>
-          <Text style={styles.headerTitle}>Account</Text>
+          <Text style={styles.headerTitle}>Profile</Text>
           <Text style={styles.headerSubtitle}>
             {isAuthenticated ? 'Student Profile & Settings' : 'Guest Portal'}
           </Text>
@@ -110,26 +165,41 @@ export default function AccountScreen() {
         style={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#4F46E5']}
+            tintColor="#4F46E5"
+          />
+        }
       >
-        {isAuthenticated ? (
+        {isAuthenticated && currentStudent ? (
           /* ========================================================================= */
-          /* SIGNED IN VIEW - Comprehensive Student Details                             */
+          /* SIGNED IN VIEW - Database-Backed Student Details                           */
           /* ========================================================================= */
           <>
-            {/* Profile Hero Card */}
+            {/* 1. Profile Hero Card */}
             <View style={styles.heroCard}>
               <View style={styles.avatarWrapper}>
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarText}>
-                    {currentStudent.name ? currentStudent.name.charAt(0) : 'S'}
+                    {currentStudent.name ? currentStudent.name.charAt(0).toUpperCase() : 'S'}
                   </Text>
                 </View>
-                <View style={styles.verifiedCheck}>
-                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                </View>
+                {isFaceRegistered && (
+                  <View style={styles.verifiedCheck} testID="biometrics-verified-badge">
+                    <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                  </View>
+                )}
               </View>
 
-              <Text style={styles.studentName}>{currentStudent.name}</Text>
+              <Text style={styles.studentName}>{currentStudent.name || currentStudent.displayName || 'Student'}</Text>
+              
+              {currentStudent.nameWithInitials && currentStudent.nameWithInitials !== currentStudent.name && (
+                <Text style={styles.studentInitials}>{currentStudent.nameWithInitials}</Text>
+              )}
+
               <Text style={styles.studentEmail}>{currentStudent.email}</Text>
 
               <View style={styles.badgeRow}>
@@ -139,14 +209,21 @@ export default function AccountScreen() {
                     <Text style={styles.indexBadgeText}>Index: {currentStudent.indexNumber}</Text>
                   </View>
                 )}
-                <View style={styles.statusBadge}>
-                  <View style={styles.statusDot} />
-                  <Text style={styles.statusBadgeText}>Active Student</Text>
+
+                <View style={[styles.statusBadge, { backgroundColor: statusBadge.bg, borderColor: statusBadge.border }]}>
+                  <View style={[styles.statusDot, { backgroundColor: statusBadge.dot }]} />
+                  <Text style={[styles.statusBadgeText, { color: statusBadge.text }]}>{statusBadge.label}</Text>
                 </View>
+
+                {currentStudent.role && (
+                  <View style={styles.roleBadge}>
+                    <Text style={styles.roleBadgeText}>{currentStudent.role.toUpperCase()}</Text>
+                  </View>
+                )}
               </View>
             </View>
 
-            {/* Academic Information Card */}
+            {/* 2. Academic Information Card (Strictly Database Attributes) */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIconWrap}>
@@ -156,42 +233,89 @@ export default function AccountScreen() {
               </View>
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>University</Text>
-                <Text style={styles.infoValue}>{mockAcademicInfo.university}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Faculty</Text>
-                <Text style={styles.infoValue}>{mockAcademicInfo.faculty}</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.facultyName)}</Text>
               </View>
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Department</Text>
-                <Text style={styles.infoValue}>{currentStudent.department || mockAcademicInfo.department}</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.department)}</Text>
               </View>
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Academic Term</Text>
-                <Text style={styles.infoValueHighlight}>{mockAcademicInfo.term}</Text>
+                <Text style={styles.infoLabel}>Department Code</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.departmentCode)}</Text>
               </View>
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Session / Intake</Text>
-                <Text style={styles.infoValue}>{currentStudent.batch || mockAcademicInfo.session}</Text>
+                <Text style={styles.infoLabel}>Faculty Head</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.facultyHead)}</Text>
               </View>
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Academic Period</Text>
-                <Text style={styles.infoValue}>{mockAcademicInfo.period}</Text>
+                <Text style={styles.infoLabel}>Academic Year</Text>
+                <Text style={styles.infoValueHighlight}>{val(currentStudent.academicYear)}</Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Year Level</Text>
+                <Text style={styles.infoValue}>
+                  {currentStudent.yearLevel !== undefined && currentStudent.yearLevel !== null
+                    ? `Year ${currentStudent.yearLevel}`
+                    : '—'}
+                </Text>
               </View>
             </View>
 
-            {/* Biometric & Face Verification Status */}
+            {/* 3. Personal & Contact Details Card (Directly from students DB table) */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconWrap}>
+                  <Ionicons name="id-card" size={18} color="#4F46E5" />
+                </View>
+                <Text style={styles.sectionTitle}>Personal & Contact Details</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>National ID (NIC)</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.nic)}</Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Date of Birth</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.dateOfBirth)}</Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Gender</Text>
+                <Text style={styles.infoValue}>
+                  {currentStudent.gender
+                    ? currentStudent.gender.charAt(0).toUpperCase() + currentStudent.gender.slice(1)
+                    : '—'}
+                </Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Contact Number</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.contactNumber)}</Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Residential Address</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.address)}</Text>
+              </View>
+            </View>
+
+            {/* 4. Biometrics & Security (One-Time Registration Rule) */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <View style={[styles.sectionIconWrap, { backgroundColor: isFaceRegistered ? '#ECFDF5' : '#FEF3C7' }]}>
@@ -206,10 +330,10 @@ export default function AccountScreen() {
 
               <View style={styles.biometricStatusRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.biometricTitle}>Face Registration</Text>
+                  <Text style={styles.biometricTitle}>Face Biometrics</Text>
                   <Text style={styles.biometricSubtitle}>
                     {isFaceRegistered
-                      ? 'Your facial embedding is active and registered for live attendance check-ins.'
+                      ? 'Your facial embedding is active and registered in the database for live attendance check-ins.'
                       : 'Face biometrics not yet registered. You must register to check in to lectures.'}
                   </Text>
                 </View>
@@ -226,19 +350,38 @@ export default function AccountScreen() {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[styles.actionButtonSecondary, { marginTop: 12 }]}
-                onPress={() => setShowFaceRegModal(true)}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="camera-reverse-outline" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
-                <Text style={styles.actionButtonSecondaryText}>
-                  {isFaceRegistered ? 'Update / Re-register Face' : 'Register Face Biometrics'}
-                </Text>
-              </TouchableOpacity>
+              {isFaceRegistered ? (
+                /* Unlocked for testing: allow re-registering face biometrics directly */
+                <View style={{ marginTop: 14 }}>
+                  <TouchableOpacity
+                    style={styles.actionButtonSecondary}
+                    onPress={() => setShowFaceRegModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="refresh-circle" size={20} color="#4F46E5" style={{ marginRight: 8 }} />
+                    <Text style={styles.actionButtonSecondaryText}>Re-register Face Biometrics</Text>
+                  </TouchableOpacity>
+                  <View style={styles.unlockedNoticeBox}>
+                    <Ionicons name="flask-outline" size={15} color="#6366F1" style={{ marginRight: 6 }} />
+                    <Text style={styles.unlockedNoticeText}>
+                      Testing Mode: Biometric re-registration is unlocked. Capturing a new face will update your active database profile.
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                /* Not registered: show the register face button */
+                <TouchableOpacity
+                  style={[styles.actionButtonPrimary, { marginTop: 14 }]}
+                  onPress={() => setShowFaceRegModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="camera" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.actionButtonPrimaryText}>Register Face Biometrics</Text>
+                </TouchableOpacity>
+              )}
             </View>
 
-            {/* Account & Contact Details */}
+            {/* 5. Account Details Card */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIconWrap}>
@@ -248,66 +391,35 @@ export default function AccountScreen() {
               </View>
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Student ID</Text>
-                <Text style={styles.infoValue}>{currentStudent.id}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>University Email</Text>
-                <Text style={styles.infoValue}>{currentStudent.email}</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.email)}</Text>
               </View>
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Role</Text>
-                <Text style={styles.infoValue}>Undergraduate Student</Text>
+                <Text style={styles.infoValue}>{roleDisplay}</Text>
+              </View>
+              <View style={styles.divider} />
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Account Status</Text>
+                <Text style={styles.infoValue}>
+                  {currentStudent.status
+                    ? currentStudent.status.charAt(0).toUpperCase() + currentStudent.status.slice(1)
+                    : 'Active'}
+                </Text>
               </View>
             </View>
 
-            {/* System & Device Info */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconWrap}>
-                  <Ionicons name="hardware-chip-outline" size={18} color="#4F46E5" />
-                </View>
-                <Text style={styles.sectionTitle}>Device & Permissions</Text>
-              </View>
-
-              <View style={styles.permissionRow}>
-                <View style={styles.permLeft}>
-                  <Ionicons name="location-outline" size={18} color="#4F46E5" style={{ marginRight: 10 }} />
-                  <Text style={styles.permText}>Lecture Hall Geofencing</Text>
-                </View>
-                <View style={styles.permBadge}>
-                  <Text style={styles.permBadgeText}>Enabled</Text>
-                </View>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.permissionRow}>
-                <View style={styles.permLeft}>
-                  <Ionicons name="camera-outline" size={18} color="#4F46E5" style={{ marginRight: 10 }} />
-                  <Text style={styles.permText}>Camera & Liveness Engine</Text>
-                </View>
-                <View style={styles.permBadge}>
-                  <Text style={styles.permBadgeText}>Enabled</Text>
-                </View>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.permissionRow}>
-                <View style={styles.permLeft}>
-                  <Ionicons name="information-circle-outline" size={18} color="#6B7280" style={{ marginRight: 10 }} />
-                  <Text style={styles.permText}>App Version</Text>
-                </View>
-                <Text style={styles.versionText}>v1.0.0 (Expo v57)</Text>
-              </View>
+            {/* Subtle Footer Note */}
+            <View style={styles.footerWrap}>
+              <Text style={styles.footerText}>Smart Attendance System • v1.0.0</Text>
             </View>
           </>
         ) : (
           /* ========================================================================= */
-          /* SIGNED OUT VIEW - Guest Portal & Sign In Prompt                           */
+          /* SIGNED OUT VIEW - Clean Guest Portal                                      */
           /* ========================================================================= */
           <View style={styles.signedOutContainer}>
             <View style={styles.signedOutHero}>
@@ -316,7 +428,7 @@ export default function AccountScreen() {
               </View>
               <Text style={styles.signedOutTitle}>Not Signed In</Text>
               <Text style={styles.signedOutSubtitle}>
-                Sign in with your University student credentials to access your personalized timetable, live lecture attendance check-ins, and biometric verification.
+                Sign in with your University student credentials to access your profile, academic details, personalized timetable, and live attendance check-ins.
               </Text>
 
               <TouchableOpacity
@@ -329,23 +441,8 @@ export default function AccountScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* University Portal Preview Card */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconWrap}>
-                  <Ionicons name="school-outline" size={18} color="#4F46E5" />
-                </View>
-                <Text style={styles.sectionTitle}>University Portal</Text>
-              </View>
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Institution</Text>
-                <Text style={styles.infoValue}>{mockAcademicInfo.university}</Text>
-              </View>
-              <View style={styles.divider} />
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Faculty</Text>
-                <Text style={styles.infoValue}>{mockAcademicInfo.faculty}</Text>
-              </View>
+            <View style={styles.footerWrap}>
+              <Text style={styles.footerText}>Smart Attendance System • v1.0.0</Text>
             </View>
           </View>
         )}
@@ -387,10 +484,14 @@ export default function AccountScreen() {
             >
               <Ionicons name="arrow-back" size={24} color="#111827" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Face Biometrics</Text>
+            <Text style={styles.modalTitle}>
+              {isFaceRegistered ? 'Re-register Face Biometrics' : 'Face Biometrics Registration'}
+            </Text>
             <View style={{ width: 32 }} />
           </View>
-          <OnboardingScreen onSuccess={handleFaceRegSuccess} />
+          {showFaceRegModal && (
+            <OnboardingScreen onSuccess={handleFaceRegSuccess} />
+          )}
         </View>
       </Modal>
     </View>
@@ -520,6 +621,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: '#111827',
+    marginBottom: 2,
+    textAlign: 'center',
+  },
+  studentInitials: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4B5563',
     marginBottom: 4,
     textAlign: 'center',
   },
@@ -554,24 +662,33 @@ const styles = StyleSheet.create({
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ECFDF5',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
   },
   statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#10B981',
     marginRight: 6,
   },
   statusBadgeText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#059669',
+  },
+  roleBadge: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4B5563',
   },
   sectionCard: {
     backgroundColor: '#FFFFFF',
@@ -609,7 +726,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingVertical: 8,
+    paddingVertical: 9,
   },
   infoLabel: {
     fontSize: 13,
@@ -622,6 +739,14 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '600',
     flex: 1.5,
+    textAlign: 'right',
+  },
+  infoValueMono: {
+    fontSize: 11,
+    color: '#374151',
+    fontWeight: '600',
+    fontFamily: 'monospace',
+    flex: 1.8,
     textAlign: 'right',
   },
   infoValueHighlight: {
@@ -679,6 +804,40 @@ const styles = StyleSheet.create({
   bioTextWarning: {
     color: '#D97706',
   },
+  lockedNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  lockedNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#4B5563',
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  actionButtonPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4F46E5',
+    paddingVertical: 12,
+    borderRadius: 10,
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  actionButtonPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   actionButtonSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -686,41 +845,37 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF2FF',
     paddingVertical: 12,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E0E7FF',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
   },
   actionButtonSecondaryText: {
     fontSize: 13,
     fontWeight: '700',
     color: '#4F46E5',
   },
-  permissionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  permLeft: {
+  unlockedNoticeBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#F5F3FF',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
   },
-  permText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#374151',
-  },
-  permBadge: {
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  permBadgeText: {
+  unlockedNoticeText: {
+    flex: 1,
     fontSize: 11,
-    fontWeight: '700',
-    color: '#059669',
+    color: '#6D28D9',
+    fontWeight: '500',
+    lineHeight: 16,
   },
-  versionText: {
+  footerWrap: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  footerText: {
     fontSize: 12,
     color: '#9CA3AF',
     fontWeight: '500',

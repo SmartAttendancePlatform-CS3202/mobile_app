@@ -30,6 +30,12 @@ export interface FaceOverlayProps {
   currentState: LivenessState;
   landmarks?: LandmarksInput;
   statusMessageOverride?: string;
+  poseProgress?: {
+    current: number;
+    total: number;
+    poseName: string;
+  };
+  poseDirection?: 'CENTER' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN';
 }
 
 /**
@@ -46,7 +52,13 @@ export function getStatusMessage(state: LivenessState, override?: string): strin
     case 'BLINK_VERIFIED':
       return 'Passive Anti-Spoofing Check';
     case 'PASSIVE_LIVENESS_PASSED':
-      return 'Generating 192D Embedding';
+      return 'Liveness Verified';
+    case 'POSE_CAPTURE_IN_PROGRESS':
+      return 'Follow Guided Head Movement';
+    case 'ALL_POSES_CAPTURED':
+      return 'Poses Captured - Scanning Depth';
+    case 'DEPTH_ESTIMATED':
+      return 'Generating Centroid Embedding';
     case 'EMBEDDING_READY':
       return 'Verified & Transmitted!';
     case 'FAILED':
@@ -73,6 +85,8 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
   currentState,
   landmarks,
   statusMessageOverride,
+  poseProgress,
+  poseDirection,
 }) => {
   const statusMessage = getStatusMessage(currentState, statusMessageOverride);
 
@@ -133,7 +147,12 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
   const getBorderColor = (): string => {
     switch (currentState) {
       case 'EMBEDDING_READY':
+      case 'DEPTH_ESTIMATED':
         return '#10B981'; // Emerald Green
+      case 'ALL_POSES_CAPTURED':
+        return '#8B5CF6'; // Purple
+      case 'POSE_CAPTURE_IN_PROGRESS':
+        return '#3B82F6'; // Blue
       case 'FAILED':
       case 'TIMEOUT':
         return '#EF4444'; // Red
@@ -148,9 +167,51 @@ export const FaceOverlay: React.FC<FaceOverlayProps> = ({
     }
   };
 
+  const getDirectionArrow = (): string | null => {
+    switch (poseDirection) {
+      case 'LEFT':
+        return '←';
+      case 'RIGHT':
+        return '→';
+      case 'UP':
+        return '↑';
+      case 'DOWN':
+        return '↓';
+      case 'CENTER':
+        return '•';
+      default:
+        return null;
+    }
+  };
+
   return (
     <View style={styles.overlayContainer} pointerEvents="none">
-
+      {/* Pose Progress Bar / Steps (Face ID style) */}
+      {poseProgress && (
+        <View style={styles.poseHeaderContainer}>
+          <View style={styles.poseStepsRow}>
+            {Array.from({ length: poseProgress.total }).map((_, idx) => {
+              const isCompleted = idx < poseProgress.current;
+              const isCurrent = idx === poseProgress.current;
+              return (
+                <View
+                  key={`pose-dot-${idx}`}
+                  style={[
+                    styles.poseDot,
+                    isCompleted && styles.poseDotCompleted,
+                    isCurrent && styles.poseDotCurrent,
+                  ]}
+                />
+              );
+            })}
+          </View>
+          {getDirectionArrow() && (
+            <View style={styles.arrowBadge}>
+              <Text style={styles.arrowText}>{getDirectionArrow()}</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Bounding Box Rect & Facial Landmarks */}
       {validDimensions && boundingBox ? (
@@ -296,5 +357,54 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#FFFFFF',
+  },
+  poseHeaderContainer: {
+    position: 'absolute',
+    top: 16,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 30,
+  },
+  poseStepsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 8,
+  },
+  poseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  poseDotCompleted: {
+    backgroundColor: '#10B981',
+  },
+  poseDotCurrent: {
+    backgroundColor: '#3B82F6',
+    transform: [{ scale: 1.3 }],
+  },
+  arrowBadge: {
+    marginTop: 8,
+    backgroundColor: 'rgba(59, 130, 246, 0.9)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 6,
+  },
+  arrowText: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
   },
 });

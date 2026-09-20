@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import { ClassSession, AcademicHeaderInfo, mockAcademicInfo } from '../services/mockData';
 import Skeleton from '../components/Skeleton';
@@ -26,6 +27,7 @@ const DAYS = [
 
 export default function TimetableScreen() {
   const navigation = useNavigation<any>();
+  const { isFaceRegistered } = useAuth();
   const [sessions, setSessions] = useState<ClassSession[]>([]);
   const [academicInfo, setAcademicInfo] = useState<AcademicHeaderInfo>(mockAcademicInfo);
   const [loading, setLoading] = useState(true);
@@ -171,6 +173,24 @@ export default function TimetableScreen() {
         <Text style={styles.facultyText}>{academicInfo.faculty} • {academicInfo.department}</Text>
         <Text style={styles.sessionText}>{academicInfo.session}</Text>
       </View>
+
+      {/* Warning Notice if Face Not Registered */}
+      {!isFaceRegistered && (
+        <TouchableOpacity
+          style={styles.warningNotice}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('FaceRegistration')}
+        >
+          <Ionicons name="alert-circle" size={20} color="#D97706" style={{ marginRight: 8 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.warningNoticeTitle}>Biometrics Not Registered</Text>
+            <Text style={styles.warningNoticeText}>
+              Register face biometrics to check in to classes.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#D97706" />
+        </TouchableOpacity>
+      )}
 
       {/* Day Selector Pills */}
       <View style={styles.daySelectorContainer}>
@@ -639,6 +659,28 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     marginTop: 6,
+  },
+  warningNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  warningNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  warningNoticeText: {
+    fontSize: 12,
+    color: '#B45309',
+    marginTop: 1,
   },
 });
 

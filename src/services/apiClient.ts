@@ -1,14 +1,15 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 
-// Support configuration via EXPO_PUBLIC_* environment variables
-export const BACKEND_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:8000'; 
-export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'http://10.0.2.2:54321'; // Default local supabase url
-export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZmF1bHQiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTY5MzUxMTMyNiwiZXhwIjoxODgzMTE1MjMyNn0.randomkeyhere'; // Mock key
+export { SUPABASE_URL, SUPABASE_ANON_KEY };
+
+export const BACKEND_BASE_URL = 
+  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 
 const apiClient = axios.create({
   baseURL: BACKEND_BASE_URL,
-  timeout: 3000,
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -16,19 +17,63 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   async (config) => {
-    const controller = new AbortController();
-    config.signal = controller.signal;
-    setTimeout(() => {
-      controller.abort();
-    }, 3000);
+    try {
+      let { data: { session } } = await supabase.auth.getSession();
 
-    const token = await AsyncStorage.getItem('userToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      // Proactively refresh if access token is expired or within 60s of expiring
+      const nowInSeconds = Math.floor(Date.now() / 1000);
+      if (session?.expires_at && session.expires_at <= nowInSeconds + 60) {
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshData.session) {
+            session = refreshData.session;
+            await AsyncStorage.setItem('userToken', session.access_token);
+          }
+        } catch (refreshErr) {
+          console.warn('Proactive token refresh error:', refreshErr);
+        }
+      }
+
+      const token = session?.access_token || (await AsyncStorage.getItem('userToken'));
+      
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (e) {
+      console.warn('Error attaching auth token to request:', e);
     }
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// Response interceptor: automatically refresh token and retry on 401 Token Expiration
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry
+    ) {
+      originalRequest._retry = true;
+      try {
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        if (!refreshError && refreshData.session?.access_token) {
+          const newToken = refreshData.session.access_token;
+          await AsyncStorage.setItem('userToken', newToken);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return apiClient(originalRequest);
+        } else {
+          console.warn('Session refresh rejected by Supabase:', refreshError?.message);
+        }
+      } catch (refreshErr) {
+        console.warn('Reactive token refresh error on 401:', refreshErr);
+      }
+    }
+    return Promise.reject(error);
+  }
 );
 
 export default apiClient;

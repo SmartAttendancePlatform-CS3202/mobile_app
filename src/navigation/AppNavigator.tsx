@@ -1,7 +1,9 @@
 import React from 'react';
+import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../context/AuthContext';
 
 // Import Screens
 import HomeScreen from '../screens/HomeScreen';
@@ -10,6 +12,9 @@ import TimetableScreen from '../screens/TimetableScreen';
 import CheckInScreen from '../screens/CheckInScreen';
 import LocationCheckScreen from '../screens/LocationCheckScreen';
 import AccountScreen from '../screens/AccountScreen';
+import LoginScreen from '../screens/LoginScreen';
+import PendingApprovalScreen from '../screens/PendingApprovalScreen';
+import OnboardingScreen from '../screens/OnboardingScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -52,38 +57,111 @@ function MainTabs() {
       <Tab.Screen name="Dashboard" component={HomeScreen} />
       <Tab.Screen name="Timetable" component={TimetableScreen} />
       <Tab.Screen name="History" component={HistoryScreen} />
-      <Tab.Screen name="Account" component={AccountScreen} />
+      <Tab.Screen name="Account" component={AccountScreen} options={{ tabBarLabel: 'Profile' }} />
     </Tab.Navigator>
   );
 }
 
-// Main App Navigator
+// Main App Navigator with Strict Auth Gating
 export default function AppNavigator() {
+  const { isAuthenticated, isPendingApproval, isFaceRegistered, loading, setFaceRegistered } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <View style={styles.loadingLogo}>
+          <Ionicons name="scan-outline" size={44} color="#4F46E5" />
+        </View>
+        <ActivityIndicator size="large" color="#4F46E5" style={{ marginTop: 20 }} />
+        <Text style={styles.loadingText}>Initializing Student Portal...</Text>
+      </View>
+    );
+  }
+
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="MainTabs" component={MainTabs} />
-      <Stack.Screen 
-        name="LocationCheck" 
-        component={LocationCheckScreen} 
-        options={{ 
-          headerShown: true, 
-          title: 'Location Verification',
-          headerStyle: { backgroundColor: '#F3F4F6' },
-          headerTintColor: '#111827',
-          headerTitleStyle: { fontWeight: 'bold' }
-        }} 
-      />
-      <Stack.Screen 
-        name="CheckIn" 
-        component={CheckInScreen} 
-        options={{ 
-          headerShown: true, 
-          title: 'Session Check-In',
-          headerStyle: { backgroundColor: '#F3F4F6' },
-          headerTintColor: '#111827',
-          headerTitleStyle: { fontWeight: 'bold' }
-        }} 
-      />
+      {!isAuthenticated ? (
+        // 1. Unauthenticated -> Login Screen
+        <Stack.Screen name="Login" component={LoginScreen} />
+      ) : isPendingApproval ? (
+        // 2. Authenticated but Pending Approval -> Locked Pending Screen
+        <Stack.Screen name="PendingApproval" component={PendingApprovalScreen} />
+      ) : (
+        // 3. Fully Authenticated Active Student -> Main App (Can view Dashboard, Timetables, Account)
+        <>
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen
+            name="FaceRegistration"
+            options={{
+              headerShown: true,
+              title: 'Face Biometrics Registration',
+              headerStyle: { backgroundColor: '#F3F4F6' },
+              headerTintColor: '#111827',
+              headerTitleStyle: { fontWeight: 'bold' },
+            }}
+          >
+            {({ navigation }: any) => (
+              <OnboardingScreen
+                onSuccess={() => {
+                  setFaceRegistered(true);
+                  if (navigation.canGoBack()) {
+                    navigation.goBack();
+                  }
+                }}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen
+            name="LocationCheck"
+            component={LocationCheckScreen}
+            options={{
+              headerShown: true,
+              title: 'Location Verification',
+              headerStyle: { backgroundColor: '#F3F4F6' },
+              headerTintColor: '#111827',
+              headerTitleStyle: { fontWeight: 'bold' },
+            }}
+          />
+          <Stack.Screen
+            name="CheckIn"
+            component={CheckInScreen}
+            options={{
+              headerShown: true,
+              title: 'Session Check-In',
+              headerStyle: { backgroundColor: '#F3F4F6' },
+              headerTintColor: '#111827',
+              headerTitleStyle: { fontWeight: 'bold' },
+            }}
+          />
+        </>
+      )}
     </Stack.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingLogo: {
+    width: 88,
+    height: 88,
+    borderRadius: 28,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+});

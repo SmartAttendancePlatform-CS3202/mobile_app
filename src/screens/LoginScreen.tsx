@@ -1,94 +1,94 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { useAuth } from '../context/AuthContext';
-import api from '../services/api';
 
 interface LoginScreenProps {
-  onLoginSuccess: (isFaceRegistered: boolean) => void;
+  onLoginSuccess?: (isFaceRegistered: boolean) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const { login, isFaceRegistered } = useAuth();
-  const [email, setEmail] = useState('savindu.23@cse.mrt.ac.lk');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [inLectureHall, setInLectureHall] = useState(false);
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [locationError, setLocationError] = useState('');
-
-  const handleCheckboxToggle = async () => {
-    const newValue = !inLectureHall;
-    setInLectureHall(newValue);
-    
-    if (newValue) {
-      setLocationError('');
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') {
-          setLocationError('Permission to access location was denied');
-          setInLectureHall(false);
-          return;
-        }
-
-        const currentLocation = await Location.getCurrentPositionAsync({});
-        setLocation(currentLocation);
-      } catch (err) {
-        setLocationError('Failed to get location');
-        setInLectureHall(false);
-      }
-    } else {
-      setLocation(null);
-    }
-  };
 
   const handleLogin = async () => {
+    if (!email.trim()) {
+      setError('Please enter your student email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
+      return;
+    }
+
     setLoading(true);
     setError('');
+
     try {
-      const response = await login(email, password);
+      const response = await login(email.trim(), password);
       if (response.success) {
-        onLoginSuccess(isFaceRegistered);
+        if (onLoginSuccess) {
+          onLoginSuccess(isFaceRegistered);
+        }
       } else {
-        setError(response.message || 'Login failed');
+        setError(response.message || 'Login failed. Please verify your credentials.');
       }
-    } catch (err) {
-      setError('Network error. Please try again.');
+    } catch (err: any) {
+      setError('Network connection error. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.headerContainer}>
           <View style={styles.logoPlaceholder}>
             <Ionicons name="scan-outline" size={40} color="#4F46E5" />
           </View>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to access your attendance portal</Text>
+          <Text style={styles.title}>Student Attendance</Text>
+          <Text style={styles.subtitle}>Sign in with your University student credentials</Text>
         </View>
-        
+
         <View style={styles.form}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email Address</Text>
+            <Text style={styles.label}>Student Email</Text>
             <View style={styles.inputContainer}>
               <Ionicons name="mail-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
-              <TextInput 
-                style={styles.input} 
-                placeholder="Enter your email" 
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. sandaruvidushan@gmail.com"
                 placeholderTextColor="#9CA3AF"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  if (error) setError('');
+                }}
                 autoCapitalize="none"
+                autoCorrect={false}
                 keyboardType="email-address"
+                editable={!loading}
               />
             </View>
           </View>
@@ -97,54 +97,53 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             <Text style={styles.label}>Password</Text>
             <View style={styles.inputContainer}>
               <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
-              <TextInput 
-                style={styles.input} 
-                placeholder="Enter your password" 
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your password"
                 placeholderTextColor="#9CA3AF"
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (error) setError('');
+                }}
                 secureTextEntry={!showPassword}
+                editable={!loading}
               />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#9CA3AF" />
+              <TouchableOpacity
+                onPress={() => setShowPassword(!showPassword)}
+                style={styles.eyeIcon}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color="#9CA3AF"
+                />
               </TouchableOpacity>
             </View>
           </View>
-          
-          <TouchableOpacity 
-            style={styles.checkboxContainer} 
-            onPress={handleCheckboxToggle}
-          >
-            <View style={[styles.checkbox, inLectureHall && styles.checkboxChecked]}>
-              {inLectureHall && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-            </View>
-            <Text style={styles.checkboxLabel}>I am in the lecture hall</Text>
-          </TouchableOpacity>
-          
-          {locationError ? (
-            <Text style={styles.locationErrorText}>{locationError}</Text>
-          ) : null}
-          
+
           {error ? (
             <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle" size={16} color="#EF4444" />
+              <Ionicons name="alert-circle" size={18} color="#EF4444" style={{ marginTop: 1 }} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
 
-          <TouchableOpacity 
-            style={styles.button} 
-            onPress={handleLogin} 
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleLogin}
             disabled={loading}
+            activeOpacity={0.85}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <Text style={styles.buttonText}>Sign In</Text>
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -154,14 +153,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
-  content: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
   },
   headerContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 36,
   },
   logoPlaceholder: {
     width: 80,
@@ -172,29 +171,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
     shadowColor: '#4F46E5',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
   },
   title: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: '#111827',
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#6B7280',
     textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 20,
   },
   form: {
     backgroundColor: '#FFFFFF',
     padding: 24,
-    borderRadius: 20,
+    borderRadius: 24,
     shadowColor: '#000',
     shadowOpacity: 0.05,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
   inputGroup: {
@@ -213,78 +214,58 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 16,
-    height: 56,
+    height: 54,
   },
   inputIcon: {
     marginRight: 12,
   },
   eyeIcon: {
-    padding: 8,
+    padding: 6,
   },
   input: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     color: '#111827',
     height: '100%',
   },
   errorContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 20,
   },
   errorText: {
-    color: '#EF4444',
+    color: '#DC2626',
     marginLeft: 8,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
-  },
-  checkboxContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 2,
-    borderColor: '#4F46E5',
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  checkboxChecked: {
-    backgroundColor: '#4F46E5',
-  },
-  checkboxLabel: {
-    fontSize: 14,
-    color: '#374151',
-  },
-  locationErrorText: {
-    color: '#EF4444',
-    fontSize: 12,
-    marginBottom: 10,
+    flex: 1,
+    lineHeight: 18,
   },
   button: {
     backgroundColor: '#4F46E5',
-    height: 56,
-    borderRadius: 12,
+    height: 54,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#4F46E5',
     shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    marginTop: 8,
+    marginTop: 4,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
   buttonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-  }
+  },
 });

@@ -1,16 +1,20 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StudentProfile, mockStudent } from '../services/mockData';
+import { StudentProfile } from '../services/mockData';
 import api from '../services/api';
+import { supabase } from '../services/supabaseClient';
 
 interface AuthContextType {
   user: StudentProfile | null;
   isAuthenticated: boolean;
   isFaceRegistered: boolean;
+  status: string | null;
+  isPendingApproval: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
   setFaceRegistered: (registered: boolean) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,96 +23,150 @@ const AUTH_STORAGE_KEY = '@smart_attendance_auth_user';
 const FACE_REG_KEY = '@smart_attendance_face_registered';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<StudentProfile | null>(mockStudent);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  const [isFaceRegistered, setIsFaceRegisteredState] = useState<boolean>(true);
+  const [user, setUser] = useState<StudentProfile | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isFaceRegistered, setIsFaceRegisteredState] = useState<boolean>(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const isPendingApproval = status === 'pending_approval' || status === 'inactive';
+
   useEffect(() => {
+    let isMounted = true;
+
     const loadStoredAuth = async () => {
       try {
-        const storedUser = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+        // 1. First, load cached user for instant offline readiness
+        const storedUserJson = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
         const storedFaceReg = await AsyncStorage.getItem(FACE_REG_KEY);
-        
-        if (storedUser !== null) {
-          const parsed = JSON.parse(storedUser);
-          setUser(parsed);
-          setIsAuthenticated(true);
-        } else {
-          // Default to mockStudent for smooth initial demo experience
-          setUser(mockStudent);
-          setIsAuthenticated(true);
+
+        if (storedUserJson) {
+          const cachedUser: StudentProfile = JSON.parse(storedUserJson);
+          if (isMounted) {
+            setUser(cachedUser);
+            setIsAuthenticated(true);
+            setStatus(cachedUser.status || 'active');
+            setIsFaceRegisteredState(
+              storedFaceReg !== null ? storedFaceReg === 'true' : cachedUser.isFaceRegistered
+            );
+          }
         }
 
-        if (storedFaceReg !== null) {
-          setIsFaceRegisteredState(storedFaceReg === 'true');
-        } else {
-          setIsFaceRegisteredState(true);
+        // 2. Validate current session with Supabase
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session && session.user) {
+          await AsyncStorage.setItem('userToken', session.access_token);
+          
+          // Re-sync student profile from database
+          try {
+            const updatedProfile = await api.fetchStudentProfile(
+              session.user.id,
+              session.user.email || ''
+            );
+
+            if (isMounted) {
+              setUser(updatedProfile);
+              setIsAuthenticated(true);
+              setStatus(updatedProfile.status || 'active');
+              setIsFaceRegisteredState(updatedProfile.isFaceRegistered);
+            }
+
+            await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedProfile));
+            await AsyncStorage.setItem(FACE_REG_KEY, String(updatedProfile.isFaceRegistered));
+          } catch (fetchErr) {
+            // Keep cached offline profile if network fails
+            console.log('Using cached profile due to network issue:', fetchErr);
+          }
+        } else if (!storedUserJson) {
+          // No active session and no cache
+          if (isMounted) {
+            setUser(null);
+            setIsAuthenticated(false);
+            setStatus(null);
+          }
         }
       } catch (e) {
         console.error('Failed to load auth state:', e);
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     loadStoredAuth();
+
+    // Listen for Supabase session changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (event === 'SIGNED_OUT') {
+          if (isMounted) {
+            setUser(null);
+            setIsAuthenticated(false);
+            setStatus(null);
+            setIsFaceRegisteredState(false);
+          }
+          await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+          await AsyncStorage.removeItem('userToken');
+          await AsyncStorage.removeItem(FACE_REG_KEY);
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          await AsyncStorage.setItem('userToken', session.access_token);
+        }
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
     try {
       const response = await api.login(email, password);
       if (response.success && response.user) {
-        const studentProfile: StudentProfile = {
-          id: response.user.id || mockStudent.id,
-          name: response.user.user_metadata?.full_name || mockStudent.name,
-          email: response.user.email || email,
-          indexNumber: response.user.user_metadata?.index_number || mockStudent.indexNumber,
-          department: response.user.user_metadata?.department || mockStudent.department,
-          batch: response.user.user_metadata?.batch || mockStudent.batch,
-          isFaceRegistered: !!(response.user.isFaceRegistered || response.user.user_metadata?.isFaceRegistered),
-        };
+        const studentProfile = response.user;
 
         setUser(studentProfile);
         setIsAuthenticated(true);
-        setIsFaceRegisteredState(studentProfile.isFaceRegistered);
+        setStatus(response.status || 'active');
+        setIsFaceRegisteredState(!!response.isFaceRegistered);
 
         await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(studentProfile));
         if (response.token) {
           await AsyncStorage.setItem('userToken', response.token);
         }
-        await AsyncStorage.setItem(FACE_REG_KEY, String(studentProfile.isFaceRegistered));
+        await AsyncStorage.setItem(FACE_REG_KEY, String(!!response.isFaceRegistered));
 
         return { success: true };
       } else {
-        // Fallback demo login if email/password matches mock student
-        if (email.trim().length > 0 && password.length >= 4) {
-          const studentProfile: StudentProfile = {
-            ...mockStudent,
-            email: email.trim(),
-          };
-          setUser(studentProfile);
-          setIsAuthenticated(true);
-          setIsFaceRegisteredState(true);
-          await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(studentProfile));
-          await AsyncStorage.setItem(FACE_REG_KEY, 'true');
-          return { success: true };
-        }
-        return { success: false, message: response.message || 'Invalid credentials' };
+        return {
+          success: false,
+          message: response.message || 'Invalid email or password',
+        };
       }
     } catch (err: any) {
-      return { success: false, message: err.message || 'Login failed. Please try again.' };
+      return {
+        success: false,
+        message: err.message || 'Login failed. Please check your network connection.',
+      };
     }
   };
 
   const logout = async () => {
     try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('Supabase signOut error:', e);
+    } finally {
       await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
       await AsyncStorage.removeItem('userToken');
+      await AsyncStorage.removeItem(FACE_REG_KEY);
       setUser(null);
       setIsAuthenticated(false);
-    } catch (e) {
-      console.error('Failed to logout:', e);
+      setStatus(null);
+      setIsFaceRegisteredState(false);
     }
   };
 
@@ -126,16 +184,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshProfile = async () => {
+    if (!user?.id) return;
+    try {
+      const updated = await api.fetchStudentProfile(user.id, user.email);
+      setUser(updated);
+      setStatus(updated.status || 'active');
+      setIsFaceRegisteredState(updated.isFaceRegistered);
+      await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
+      await AsyncStorage.setItem(FACE_REG_KEY, String(updated.isFaceRegistered));
+    } catch (e) {
+      console.warn('Failed to refresh profile:', e);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
         isAuthenticated,
         isFaceRegistered,
+        status,
+        isPendingApproval,
         loading,
         login,
         logout,
         setFaceRegistered,
+        refreshProfile,
       }}
     >
       {children}
