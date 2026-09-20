@@ -198,13 +198,26 @@ class ApiService {
     }
   }
 
-  async registerFace(faceEmbedding: Float32Array | number[]) {
+  async registerFace(
+    faceEmbedding: Float32Array | number[],
+    poseEmbeddings?: (Float32Array | number[])[],
+    depthFeatures?: number[],
+    enrollmentMetadata?: Record<string, any>,
+    qualityScore: number = 1.0,
+  ) {
     const embeddingArray = Array.from(faceEmbedding);
+    const posesArray = poseEmbeddings
+      ? poseEmbeddings.map((p) => Array.from(p))
+      : undefined;
 
     // 1. Attempt registering through the backend attendance microservice
     try {
       const response = await apiClient.post('/attendance/onboarding/register-face', {
         face_embedding: embeddingArray,
+        pose_embeddings: posesArray,
+        depth_features: depthFeatures,
+        enrollment_metadata: enrollmentMetadata,
+        quality_score: qualityScore,
       });
       return { success: true, data: response.data };
     } catch (error: any) {
@@ -222,21 +235,25 @@ class ApiService {
             .update({ is_active: false })
             .eq('student_id', studentId);
 
-          // Insert active 192-dimensional vector into Supabase PostgreSQL face_profiles
+          // Insert active multi-dimensional vector into Supabase PostgreSQL face_profiles
           const { error: insertError } = await supabase
             .from('face_profiles')
             .insert({
               student_id: studentId,
               embedding: embeddingArray,
+              pose_embeddings: posesArray,
+              depth_features: depthFeatures,
+              enrollment_metadata: enrollmentMetadata,
+              enrollment_version: 2,
               reference_photo_url: `https://storage.example.com/faces/${studentId}.jpg`,
-              quality_score: 1.0,
+              quality_score: qualityScore,
               is_active: true,
             });
 
           if (!insertError) {
             return {
               success: true,
-              data: { message: '192-D face embedding registered directly in database.' },
+              data: { message: 'Multi-dimensional face biometric profile registered directly in database.' },
             };
           }
           console.warn('Supabase DB fallback insert error:', insertError);

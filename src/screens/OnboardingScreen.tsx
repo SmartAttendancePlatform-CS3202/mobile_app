@@ -9,7 +9,14 @@ import {
   LivenessStateMachine,
   LivenessState,
 } from '../liveness';
-import { generateFaceEmbedding } from '../embedding';
+import { generateFaceEmbedding, computeCentroidEmbedding } from '../embedding';
+import {
+  PoseGuide,
+  POSE_SEQUENCE,
+  GuidedPose,
+  LightingNormalizer,
+  DepthEstimator,
+} from '../enrollment';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
 
@@ -28,6 +35,11 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   const [landmarks, setLandmarks] = useState<LandmarkPoint[] | null>(null);
   const [layoutWidth, setLayoutWidth] = useState<number>(300);
   const [layoutHeight, setLayoutHeight] = useState<number>(300);
+  const [poseInstruction, setPoseInstruction] = useState<string>('');
+  const [poseProgress, setPoseProgress] = useState<
+    { current: number; total: number; poseName: string } | undefined
+  >(undefined);
+  const [poseDirection, setPoseDirection] = useState<GuidedPose | undefined>(undefined);
 
   const cameraRef = useRef<CameraRef>(null);
   const stateMachineRef = useRef<LivenessStateMachine>(new LivenessStateMachine());
@@ -46,13 +58,17 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   }, []);
 
   /**
-   * Automated End-to-End Liveness & Face Registration Pipeline
+   * Automated Multi-Dimensional Biometric Registration Pipeline
+   * (Active Liveness -> Passive Anti-Spoof -> 5 Guided Poses -> Pseudo-Depth -> Centroid Embedding -> API)
    */
   const runRegistrationPipeline = useCallback(async () => {
     if (isPipelineRunningRef.current) return;
     isPipelineRunningRef.current = true;
     setLoading(true);
     setError('');
+    setPoseInstruction('');
+    setPoseProgress(undefined);
+    setPoseDirection(undefined);
 
     try {
       // Initialize modules
@@ -60,7 +76,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
       activeDetectorRef.current.reset();
       stateMachineRef.current.reset();
 
-      // Step a: Face Detected
+      // Step 1: Face Detected
       const detectedBbox: BoundingBox = { x: 210, y: 390, width: 300, height: 300 };
       const detectedLandmarks: LandmarkPoint[] = [
         { x: 300, y: 480, name: 'leftEye' },
@@ -72,9 +88,9 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
       setLandmarks(detectedLandmarks);
       stateMachineRef.current.handleFaceDetected({ boundingBox: detectedBbox, landmarks: detectedLandmarks });
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
-      // Step b: User Blinks (Active Liveness Verification)
+      // Step 2: User Blinks (Active Liveness Verification)
       const now = Date.now();
       activeDetectorRef.current.processFrame({ timestamp: now, leftEyeOpenProbability: 0.95, rightEyeOpenProbability: 0.95 });
       activeDetectorRef.current.processFrame({ timestamp: now + 150, leftEyeOpenProbability: 0.1, rightEyeOpenProbability: 0.1 });
@@ -90,9 +106,9 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
-      // Step c: Passive Anti-Spoofing Check
+      // Step 3: Passive Anti-Spoofing Check
       const frameImg = {
         data: new Uint8ClampedArray(720 * 1280 * 4).fill(120),
         width: 720,
@@ -111,21 +127,81 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 300));
 
-      // Step d: 192D Embedding Generation
-      const rawFaceInput = new Float32Array(1 * 112 * 112 * 3);
-      for (let i = 0; i < rawFaceInput.length; i++) {
-        rawFaceInput[i] = Math.sin(i * 0.1) * 100 + 128;
+      // Step 4: Multi-Pose Guided Capture (5 Poses)
+      stateMachineRef.current.handlePoseCaptureStarted();
+      const poseGuide = new PoseGuide(3);
+      const poseEmbeddings: Float32Array[] = [];
+
+      for (let i = 0; i < POSE_SEQUENCE.length; i++) {
+        const target = POSE_SEQUENCE[i];
+        setPoseDirection(target.pose);
+        setPoseProgress({ current: i, total: POSE_SEQUENCE.length, poseName: target.pose });
+        setPoseInstruction(target.instruction);
+
+        // Simulate guided orientation hold & burst capture
+        await new Promise((resolve) => setTimeout(resolve, 600));
+
+        // Generate lighting-normalized 112x112 face input for this pose
+        const syntheticRgb = new Uint8Array(112 * 112 * 3);
+        const poseAngleFactor = (i - 2) * 0.1; // Variance reflecting pose angle
+        for (let j = 0; j < syntheticRgb.length; j++) {
+          syntheticRgb[j] = Math.max(0, Math.min(255, Math.round(128 + Math.sin(j * 0.05 + poseAngleFactor) * 80)));
+        }
+
+        const normalizedInput = LightingNormalizer.normalizeRgbFace(syntheticRgb, 112, 112);
+        const embedding = await generateFaceEmbedding(normalizedInput);
+        poseEmbeddings.push(embedding);
+
+        poseGuide.advance();
       }
-      const embedding = await generateFaceEmbedding(rawFaceInput);
 
-      stateMachineRef.current.handleEmbeddingReady({ embedding });
+      stateMachineRef.current.handleAllPosesCaptured({ poseCount: poseEmbeddings.length });
+      setPoseProgress({ current: 5, total: 5, poseName: 'COMPLETE' });
+      setPoseInstruction('Analyzing facial depth topology...');
 
       await new Promise((resolve) => setTimeout(resolve, 400));
 
-      // Step e: Payload Transmission & Face Registration
-      const regResponse = await api.registerFace(embedding);
+      // Step 5: Pseudo-Depth & Topological Mesh Feature Extraction (48D)
+      const mockGray = new Uint8Array(112 * 112);
+      for (let p = 0; p < mockGray.length; p++) {
+        mockGray[p] = Math.round(120 + Math.sin(p * 0.02) * 40);
+      }
+      const depthFeatures = DepthEstimator.extractDepthFeatures(mockGray, 112, 112, {
+        leftEye: { x: 35, y: 40 },
+        rightEye: { x: 77, y: 40 },
+        noseBase: { x: 56, y: 65 },
+        bottomMouth: { x: 56, y: 88 },
+      });
+
+      stateMachineRef.current.handleDepthEstimated({ depthFeatureDim: depthFeatures.length });
+      setPoseInstruction('Computing centroid biometric profile...');
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      // Step 6: Centroid Embedding Calculation
+      const centroidEmbedding = computeCentroidEmbedding(poseEmbeddings);
+      stateMachineRef.current.handleEmbeddingReady({ centroid: centroidEmbedding });
+      setPoseInstruction('Securing & transmitting profile...');
+
+      // Step 7: Transmission of v2 Multi-Dimensional Biometrics
+      const enrollmentMetadata = {
+        pose_count: poseEmbeddings.length,
+        poses: POSE_SEQUENCE.map((p) => p.pose),
+        capture_timestamp: new Date().toISOString(),
+        lighting_normalized: true,
+        depth_dimensions: depthFeatures.length,
+        version: 2,
+      };
+
+      const regResponse = await api.registerFace(
+        centroidEmbedding,
+        poseEmbeddings,
+        depthFeatures,
+        enrollmentMetadata,
+        0.98
+      );
 
       if (regResponse.success) {
         onSuccess();
@@ -174,7 +250,10 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Face Registration</Text>
-        <Text style={styles.subtitle}>Please align your face in the frame to register it for secure attendance check-ins.</Text>
+        <Text style={styles.subtitle}>
+          {poseInstruction ||
+            'Align your face in the frame to register multi-angle biometrics.'}
+        </Text>
       </View>
 
       <View style={styles.cameraWrapper}>
@@ -196,6 +275,9 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
             isFrontCamera={true}
             currentState={livenessState}
             landmarks={landmarks}
+            poseProgress={poseProgress}
+            poseDirection={poseDirection}
+            statusMessageOverride={poseInstruction || undefined}
           />
         </View>
       </View>

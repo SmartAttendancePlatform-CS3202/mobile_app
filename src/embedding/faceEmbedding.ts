@@ -199,8 +199,59 @@ export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Flo
   // 3. Apply L2 unit normalization (v / sqrt(sum(v_i^2)))
   const normalizedVector = l2Normalize(vector192);
 
-  // 4. Log resulting 192D Float32Array vector to console
-  console.log('[Embedding] Generated 192D vector:', Array.from(normalizedVector));
-
   return normalizedVector;
 }
+
+/**
+ * Computes the L2-normalized centroid embedding from multiple pose embeddings.
+ */
+export function computeCentroidEmbedding(embeddings: Float32Array[]): Float32Array {
+  if (!embeddings || embeddings.length === 0) {
+    throw new Error('[Embedding] Cannot compute centroid of empty embeddings array.');
+  }
+
+  const dim = embeddings[0].length;
+  const centroid = new Float32Array(dim);
+
+  for (let e = 0; e < embeddings.length; e++) {
+    const vec = embeddings[e];
+    for (let i = 0; i < dim; i++) {
+      centroid[i] += vec[i];
+    }
+  }
+
+  for (let i = 0; i < dim; i++) {
+    centroid[i] /= embeddings.length;
+  }
+
+  return l2Normalize(centroid);
+}
+
+/**
+ * Generates embeddings for all guided poses and calculates their centroid.
+ */
+export async function generateMultiPoseEmbeddings(
+  poseFrames: ImageInput[]
+): Promise<{
+  centroid: Float32Array;
+  poseEmbeddings: Float32Array[];
+}> {
+  if (!poseFrames || poseFrames.length === 0) {
+    throw new Error('[Embedding] poseFrames cannot be empty.');
+  }
+
+  const poseEmbeddings: Float32Array[] = [];
+
+  for (let i = 0; i < poseFrames.length; i++) {
+    const embedding = await generateFaceEmbedding(poseFrames[i]);
+    poseEmbeddings.push(embedding);
+  }
+
+  const centroid = computeCentroidEmbedding(poseEmbeddings);
+
+  return {
+    centroid,
+    poseEmbeddings,
+  };
+}
+

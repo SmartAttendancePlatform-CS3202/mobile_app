@@ -9,6 +9,9 @@ export type LivenessState =
   | 'FACE_DETECTED'
   | 'BLINK_VERIFIED'
   | 'PASSIVE_LIVENESS_PASSED'
+  | 'POSE_CAPTURE_IN_PROGRESS'
+  | 'ALL_POSES_CAPTURED'
+  | 'DEPTH_ESTIMATED'
   | 'EMBEDDING_READY'
   | 'FAILED'
   | 'TIMEOUT';
@@ -43,7 +46,10 @@ const ALLOWED_TRANSITIONS: Record<LivenessState, LivenessState[]> = {
   IDLE: ['FACE_DETECTED'],
   FACE_DETECTED: ['BLINK_VERIFIED', 'FAILED', 'TIMEOUT', 'IDLE'],
   BLINK_VERIFIED: ['PASSIVE_LIVENESS_PASSED', 'FAILED', 'TIMEOUT', 'IDLE'],
-  PASSIVE_LIVENESS_PASSED: ['EMBEDDING_READY', 'FAILED', 'TIMEOUT', 'IDLE'],
+  PASSIVE_LIVENESS_PASSED: ['POSE_CAPTURE_IN_PROGRESS', 'EMBEDDING_READY', 'FAILED', 'TIMEOUT', 'IDLE'],
+  POSE_CAPTURE_IN_PROGRESS: ['ALL_POSES_CAPTURED', 'FAILED', 'TIMEOUT', 'IDLE'],
+  ALL_POSES_CAPTURED: ['DEPTH_ESTIMATED', 'EMBEDDING_READY', 'FAILED', 'TIMEOUT', 'IDLE'],
+  DEPTH_ESTIMATED: ['EMBEDDING_READY', 'FAILED', 'TIMEOUT', 'IDLE'],
   EMBEDDING_READY: ['IDLE'],
   FAILED: ['IDLE', 'FACE_DETECTED'],
   TIMEOUT: ['IDLE', 'FACE_DETECTED'],
@@ -142,7 +148,10 @@ export class LivenessStateMachine {
     if (
       nextState === 'FACE_DETECTED' ||
       nextState === 'BLINK_VERIFIED' ||
-      nextState === 'PASSIVE_LIVENESS_PASSED'
+      nextState === 'PASSIVE_LIVENESS_PASSED' ||
+      nextState === 'POSE_CAPTURE_IN_PROGRESS' ||
+      nextState === 'ALL_POSES_CAPTURED' ||
+      nextState === 'DEPTH_ESTIMATED'
     ) {
       this.startTimeoutTimer();
     }
@@ -200,6 +209,18 @@ export class LivenessStateMachine {
 
   public handlePassiveLivenessPassed(payload?: any): boolean {
     return this.transitionTo('PASSIVE_LIVENESS_PASSED', payload);
+  }
+
+  public handlePoseCaptureStarted(payload?: any): boolean {
+    return this.transitionTo('POSE_CAPTURE_IN_PROGRESS', payload);
+  }
+
+  public handleAllPosesCaptured(payload?: any): boolean {
+    return this.transitionTo('ALL_POSES_CAPTURED', payload);
+  }
+
+  public handleDepthEstimated(payload?: any): boolean {
+    return this.transitionTo('DEPTH_ESTIMATED', payload);
   }
 
   public handleEmbeddingReady(payload?: any): boolean {
