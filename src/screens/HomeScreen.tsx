@@ -190,7 +190,7 @@ export default function HomeScreen() {
                   return;
                 }
                 if (session.isCheckInAllowed) {
-                  navigation.navigate('LocationCheck', { sessionId: session.id });
+                  navigation.navigate('LocationCheck', { sessionId: session.id, session });
                 }
               }}
               disabled={!session.isCheckInAllowed}

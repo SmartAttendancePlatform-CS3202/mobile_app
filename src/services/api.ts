@@ -2,6 +2,7 @@ import apiClient, { BACKEND_BASE_URL } from './apiClient';
 import { supabase } from './supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { mockTimetableSchedule, mockAcademicInfo, mockAttendanceHistory, StudentProfile } from './mockData';
+import { calculateHaversineDistance } from '../utils/geo';
 
 class ApiService {
   async fetchStudentProfile(userId: string, email: string): Promise<StudentProfile> {
@@ -487,21 +488,65 @@ class ApiService {
     }
   }
 
-  async checkInLocationOnly(sessionId: string, lat: number, lng: number) {
+  async verifyLocation(sessionId: string, lat: number, lng: number): Promise<{
+    success: boolean;
+    inside: boolean;
+    distance_meters?: number;
+    radius_meters?: number;
+    venue_name?: string;
+    message?: string;
+  }> {
     if (sessionId === 'TEST_MOCK_CLASS') {
-      return { success: true, data: { message: 'Mock location check-in successful' } };
+      const dist = calculateHaversineDistance(lat, lng, 6.7951, 79.9009);
+      const inside = dist <= 30;
+      return {
+        success: true,
+        inside,
+        distance_meters: dist,
+        radius_meters: 30,
+        venue_name: 'Seminar Room (Test Class)',
+        message: inside
+          ? 'Within 30m geofence'
+          : `Outside 30m geofence (${Math.round(dist)}m away, must be <= 30m)`,
+      };
     }
+
     try {
-      const response = await apiClient.post('/attendance/checkin/tick', {
+      const response = await apiClient.post('/attendance/checkin/verify-location', {
         lecture_session_id: sessionId,
         latitude: lat,
-        longitude: lng
+        longitude: lng,
       });
-      return { success: true, data: response.data };
+      const data = response.data;
+      return {
+        success: true,
+        inside: Boolean(data?.inside),
+        distance_meters: data?.distance_meters,
+        radius_meters: data?.radius_meters || 30,
+        venue_name: data?.venue_name,
+        message: data?.inside
+          ? 'Location verified within geofence'
+          : `Outside geofence (${Math.round(data?.distance_meters || 0)}m away, must be <= 30m)`,
+      };
     } catch (error: any) {
-      return { success: false, message: error.response?.data?.detail || 'Location check-in failed' };
+      const msg = error.response?.data?.detail || error.message || 'Location verification failed';
+      return {
+        success: false,
+        inside: false,
+        message: msg,
+      };
     }
   }
+
+  async checkInLocationOnly(sessionId: string, lat: number, lng: number) {
+    const res = await this.verifyLocation(sessionId, lat, lng);
+    return {
+      success: res.success && res.inside,
+      data: res,
+      message: res.message,
+    };
+  }
+
 
   // Backwards compatibility for the old CheckInScreen until we update it
   async checkIn(sessionId: string, currentLat: number, currentLng: number, currentFaceCode: string) {
