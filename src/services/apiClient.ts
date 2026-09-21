@@ -72,8 +72,19 @@ apiClient.interceptors.response.use(
         console.warn('Reactive token refresh error on 401:', refreshErr);
       }
     }
+
+    if (!error.response && (error.code === 'ECONNABORTED' || error.message?.includes('Network Error'))) {
+      console.warn(
+        `[Network Error] Unable to connect to backend at ${BACKEND_BASE_URL}.\n` +
+        `• If testing on a physical Android device over USB, ensure you ran: adb reverse tcp:8000 tcp:8000\n` +
+        `• If testing over Wi-Fi, ensure EXPO_PUBLIC_API_URL in mobile-app/.env is set to http://<YOUR_PC_IP>:8000\n` +
+        `• If testing on Android Emulator, set EXPO_PUBLIC_API_URL to http://10.0.2.2:8000`
+      );
+    }
+
     return Promise.reject(error);
   }
 );
+
 
 export default apiClient;

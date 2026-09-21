@@ -84,7 +84,7 @@ export const mockStudent: StudentProfile = {
 const UOM_CSE_COORDS = {
   latitude: 6.7951,
   longitude: 79.9009,
-  radiusInMeters: 150,
+  radiusInMeters: 30,
 };
 
 export const mockTimetableSchedule: ClassSession[] = [
