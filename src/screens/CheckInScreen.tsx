@@ -333,15 +333,15 @@ export default function CheckInScreen() {
 
       {/* Status Banner */}
       <View style={[
-        styles.statusBox, 
+        styles.statusBox,
         statusState === 'loading' && styles.statusLoading,
         statusState === 'ready' && styles.statusReady,
         statusState === 'error' && styles.statusError,
       ]}>
-        <Ionicons 
-          name={statusState === 'ready' ? "checkmark-circle" : (statusState === 'error' ? "alert-circle" : "sync")} 
-          size={20} 
-          color={statusState === 'ready' ? "#10B981" : (statusState === 'error' ? "#EF4444" : "#4F46E5")} 
+        <Ionicons
+          name={statusState === 'ready' ? "checkmark-circle" : (statusState === 'error' ? "alert-circle" : "sync")}
+          size={20}
+          color={statusState === 'ready' ? "#10B981" : (statusState === 'error' ? "#EF4444" : "#4F46E5")}
           style={styles.statusIcon}
         />
         <Text style={[
@@ -354,7 +354,7 @@ export default function CheckInScreen() {
 
       {/* Camera View & Face Bounding Box Overlay */}
       <View style={styles.cameraWrapper}>
-        <View 
+        <View
           style={[styles.cameraContainer, statusState === 'ready' && styles.cameraReady]}
           onLayout={(e) => {
             const { width, height } = e.nativeEvent.layout;
@@ -398,9 +398,9 @@ export default function CheckInScreen() {
         )}
 
         {statusState === 'error' && retryCount < MAX_RETRIES && (
-          <TouchableOpacity 
-            style={[styles.verifyButton, styles.buttonRetry]} 
-            onPress={handleRetry} 
+          <TouchableOpacity
+            style={[styles.verifyButton, styles.buttonRetry]}
+            onPress={handleRetry}
             disabled={loading}
           >
             {loading ? (
@@ -446,8 +446,8 @@ export default function CheckInScreen() {
                 ? `Biometric match confirmed against database profile with ${Math.round(confidence * 100)}% similarity confidence.`
                 : 'You have been successfully verified against the database and checked in.'}
             </Text>
-            <TouchableOpacity 
-              style={styles.modalButton} 
+            <TouchableOpacity
+              style={styles.modalButton}
               activeOpacity={0.8}
               onPress={() => {
                 setShowSuccessModal(false);

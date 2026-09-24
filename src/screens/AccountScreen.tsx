@@ -13,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
+import { EnrolledModule } from '../services/mockData';
 import LoginScreen from './LoginScreen';
 import OnboardingScreen from './OnboardingScreen';
 
@@ -31,13 +33,57 @@ export default function AccountScreen() {
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showFaceRegModal, setShowFaceRegModal] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [modules, setModules] = useState<EnrolledModule[]>([]);
+  const [totalCredits, setTotalCredits] = useState<number>(0);
+  const [modulesLoading, setModulesLoading] = useState<boolean>(false);
+  const [syncingModules, setSyncingModules] = useState<boolean>(false);
 
   const currentStudent = user;
 
+  const loadModules = async () => {
+    setModulesLoading(true);
+    try {
+      const res = await api.getEnrolledModulesSummary();
+      if (res.success && res.modules) {
+        setModules(res.modules);
+        setTotalCredits(res.totalCredits);
+      }
+    } catch (e) {
+      console.log('Error loading enrolled modules:', e);
+    }
+    setModulesLoading(false);
+  };
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      loadModules();
+    }
+  }, [isAuthenticated]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await refreshProfile();
+    await Promise.all([refreshProfile(), loadModules()]);
     setRefreshing(false);
+  };
+
+  const handleSyncModulesPress = async () => {
+    setSyncingModules(true);
+    try {
+      const res = await api.getEnrolledModulesSummary();
+      if (res.success && res.modules) {
+        setModules(res.modules);
+        setTotalCredits(res.totalCredits);
+        Alert.alert(
+          'Synchronization Complete',
+          `Successfully imported ${res.modules.length} enrolled modules (${res.totalCredits} credits) from the university database.`
+        );
+      } else {
+        Alert.alert('Sync Result', res.message || 'No enrolled classes found in database.');
+      }
+    } catch (err: any) {
+      Alert.alert('Sync Error', err?.message || 'Failed to sync with database.');
+    }
+    setSyncingModules(false);
   };
 
   const handleSignOutPress = () => {
@@ -270,6 +316,79 @@ export default function AccountScreen() {
                     : '—'}
                 </Text>
               </View>
+            </View>
+
+            {/* Enrolled Modules Card */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconWrap}>
+                  <Ionicons name="book" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sectionTitle}>Enrolled Modules</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    {modules.length} {modules.length === 1 ? 'Course' : 'Courses'} • {totalCredits} Total Credits
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.syncIconButton}
+                  activeOpacity={0.7}
+                  onPress={handleSyncModulesPress}
+                  disabled={syncingModules}
+                >
+                  {syncingModules ? (
+                    <ActivityIndicator size="small" color="#4F46E5" />
+                  ) : (
+                    <Ionicons name="sync" size={18} color="#4F46E5" />
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {modulesLoading ? (
+                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="#4F46E5" />
+                  <Text style={{ marginTop: 8, color: '#6B7280', fontSize: 13 }}>Loading enrolled modules...</Text>
+                </View>
+              ) : modules.length === 0 ? (
+                <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                  <Ionicons name="school-outline" size={36} color="#9CA3AF" />
+                  <Text style={{ marginTop: 8, color: '#6B7280', fontSize: 14, fontWeight: '500' }}>
+                    No enrolled modules found in database
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.syncButtonOutline}
+                    onPress={handleSyncModulesPress}
+                    disabled={syncingModules}
+                  >
+                    <Ionicons name="sync-outline" size={15} color="#4F46E5" style={{ marginRight: 6 }} />
+                    <Text style={styles.syncButtonOutlineText}>Import from University DB</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={{ marginTop: 6 }}>
+                  {modules.map((m, idx) => (
+                    <View key={m.id || idx}>
+                      <View style={styles.moduleItemRow}>
+                        <View style={styles.moduleCodeBadge}>
+                          <Text style={styles.moduleCodeBadgeText}>{m.courseCode}</Text>
+                        </View>
+                        <View style={{ flex: 1, marginHorizontal: 10 }}>
+                          <Text style={styles.moduleTitle} numberOfLines={1}>{m.courseName}</Text>
+                          <Text style={styles.moduleMeta}>
+                            {m.lecturer ? `Lecturer: ${m.lecturer}` : ''}
+                            {m.lecturer && m.venue ? ' • ' : ''}
+                            {m.venue ? `Venue: ${m.venue}` : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.creditsBadge}>
+                          <Text style={styles.creditsBadgeText}>{m.credits ?? 3} Cr</Text>
+                        </View>
+                      </View>
+                      {idx < modules.length - 1 && <View style={styles.divider} />}
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             {/* 3. Personal & Contact Details Card (Directly from students DB table) */}
@@ -965,5 +1084,74 @@ const styles = StyleSheet.create({
   },
   modalCloseButton: {
     padding: 6,
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  syncIconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  syncButtonOutline: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  syncButtonOutlineText: {
+    color: '#4F46E5',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  moduleItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  moduleCodeBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  moduleCodeBadgeText: {
+    color: '#4F46E5',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  moduleTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  moduleMeta: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  creditsBadge: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  creditsBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4B5563',
   },
 });

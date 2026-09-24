@@ -1,8 +1,72 @@
 import apiClient, { BACKEND_BASE_URL } from './apiClient';
 import { supabase } from './supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { mockTimetableSchedule, mockAcademicInfo, mockAttendanceHistory, StudentProfile } from './mockData';
+import { StudentProfile, ClassSession, EnrolledModule, WeekDay, mockAcademicInfo } from './mockData';
 import { calculateHaversineDistance } from '../utils/geo';
+import { EMBEDDING_DIM } from '../embedding/faceEmbedding';
+
+function mapOfferingToClassSession(offering: any): ClassSession {
+  const rawDay = offering.day || 'Monday';
+  const day = (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(rawDay)
+    ? rawDay
+    : 'Monday') as WeekDay;
+
+  const dayMap: Record<string, number> = {
+    Monday: 1,
+    Tuesday: 2,
+    Wednesday: 3,
+    Thursday: 4,
+    Friday: 5,
+    Saturday: 6,
+    Sunday: 7,
+  };
+
+  const startTime = offering.start_time || offering.startTime || '08:00';
+  const endTime = offering.end_time || offering.endTime || '10:00';
+
+  // Compute duration (e.g. "2h" or "1h 30m")
+  let duration = '2h';
+  try {
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    let totalMins = (eh * 60 + em) - (sh * 60 + sm);
+    if (totalMins < 0) {
+      totalMins += 24 * 60; // Spans past midnight
+    }
+    if (totalMins > 0) {
+      const hours = Math.floor(totalMins / 60);
+      const mins = totalMins % 60;
+      duration = hours > 0 ? (mins > 0 ? `${hours}h ${mins}m` : `${hours}h`) : `${mins}m`;
+    }
+  } catch {}
+
+  const courseCode = offering.course_code || offering.course?.course_code || 'COURSE';
+  const courseName = offering.course_name || offering.course?.name || 'Class Session';
+  const lecturer = offering.lecturer_name || offering.lecturer?.user?.username || 'Lecturer';
+  const venue = offering.venue_name || offering.venue?.name || 'Campus Venue';
+  const venueId = offering.venue_id || offering.venue?.id || undefined;
+  const credits = offering.course?.credits ?? offering.course_credits ?? undefined;
+
+  return {
+    id: offering.id,
+    courseCode,
+    courseName,
+    lecturer,
+    type: 'L',
+    typeLabel: 'Lecture (L)',
+    venue,
+    venue_id: venueId,
+    day,
+    dayIndex: dayMap[day] || 1,
+    startTime,
+    endTime,
+    duration,
+    isActive: false,
+    credits,
+    semester: offering.semester || undefined,
+    offeringCode: offering.offering_code || undefined,
+  };
+}
 
 class ApiService {
   async fetchStudentProfile(userId: string, email: string): Promise<StudentProfile> {
@@ -30,7 +94,7 @@ class ApiService {
           isFaceRegistered = !!faceData?.id;
           faceRegisteredAt = faceData?.registered_at;
           faceQualityScore = faceData?.quality_score;
-        } catch {}
+        } catch { }
 
         return {
           id: data.id,
@@ -260,6 +324,12 @@ class ApiService {
             };
           }
           console.warn('Supabase DB fallback insert error:', JSON.stringify(insertError));
+          if (insertError?.code === '23503') {
+            return {
+              success: false,
+              message: 'Student account record not found in directory. Please contact your administrator to complete your student profile setup.',
+            };
+          }
           if (insertError?.message) {
             return {
               success: false,
@@ -278,31 +348,261 @@ class ApiService {
     }
   }
 
-  async getSessions() {
+  /**
+   * Fetch all enrolled classes for the logged in student with triple-layer resilience:
+   * 1. Primary: Backend scheduling microservice via Kong (/scheduling/timetables/me)
+   * 2. Fallback: Direct Supabase PostgREST query on enrollments + course_offerings + courses + venues
+   * 3. Complete Offline: AsyncStorage cached schedule
+   */
+  async getEnrolledClasses(day?: string): Promise<{ success: boolean; classes: ClassSession[]; message?: string }> {
+    let classes: ClassSession[] = [];
+
+    // 1. Primary: Attempt through Backend scheduling microservice via Kong
     try {
-      const response = await apiClient.get('/attendance/sessions');
+      const response = await apiClient.get('/scheduling/timetables/me');
       if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-        return { success: true, sessions: response.data };
+        classes = response.data.map(mapOfferingToClassSession);
+        // Persist to local offline cache
+        await AsyncStorage.setItem('@enrolled_classes_cache', JSON.stringify(classes)).catch(() => {});
       }
-      return { success: true, sessions: mockTimetableSchedule };
-    } catch (error: any) {
-      // Graceful fallback to mock timetable data
-      return { success: true, sessions: mockTimetableSchedule, isMock: true };
+    } catch (e: any) {
+      console.log('Backend scheduling microservice unavailable for timetable, using resilient Supabase DB fallback:', e?.message);
     }
+
+    // 2. Resilient Direct Supabase Database Fallback if microservice failed or returned empty
+    if (classes.length === 0) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const studentId = session?.user?.id;
+        if (studentId) {
+          const { data, error } = await supabase
+            .from('enrollments')
+            .select(`
+              id,
+              is_active,
+              course_offering:course_offerings (
+                id,
+                offering_code,
+                semester,
+                day,
+                start_time,
+                end_time,
+                venue_id,
+                course:courses (id, course_code, name, credits),
+                venue:venues (id, name, building, floor, boundary_data),
+                lecturer:lecturers (id, user:users (username))
+              )
+            `)
+            .eq('student_id', studentId)
+            .eq('is_active', true);
+
+          if (!error && data && data.length > 0) {
+            const rawOfferings = data
+              .map((row: any) => row.course_offering)
+              .filter(Boolean);
+            classes = rawOfferings.map(mapOfferingToClassSession);
+            // Persist to local offline cache
+            await AsyncStorage.setItem('@enrolled_classes_cache', JSON.stringify(classes)).catch(() => {});
+          }
+        }
+      } catch (dbErr) {
+        console.log('Supabase direct DB fallback for enrolled classes note:', dbErr);
+      }
+    }
+
+    // 3. Complete Offline Cache Fallback (Airplane mode / zero internet)
+    if (classes.length === 0) {
+      try {
+        const cached = await AsyncStorage.getItem('@enrolled_classes_cache');
+        if (cached) {
+          classes = JSON.parse(cached);
+        }
+      } catch (cacheErr) {
+        console.log('AsyncStorage offline cache read note:', cacheErr);
+      }
+    }
+
+    if (classes.length > 0) {
+      // Sort classes by start time
+      classes.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+
+      // Filter by day if requested
+      if (day && day !== 'All') {
+        const filtered = classes.filter((c) => c.day?.toLowerCase() === day.toLowerCase());
+        return { success: true, classes: filtered };
+      }
+      return { success: true, classes };
+    }
+
+    return { success: false, classes: [], message: 'No enrolled classes found for student.' };
+  }
+
+  /**
+   * Derive a unique list of enrolled subjects/modules with total credits count.
+   */
+  async getEnrolledModulesSummary(): Promise<{
+    success: boolean;
+    modules: EnrolledModule[];
+    totalCredits: number;
+    message?: string;
+  }> {
+    const res = await this.getEnrolledClasses();
+    if (!res.success || !res.classes || res.classes.length === 0) {
+      return { success: false, modules: [], totalCredits: 0, message: res.message || 'No enrolled classes' };
+    }
+
+    const moduleMap = new Map<string, EnrolledModule>();
+    let totalCredits = 0;
+
+    for (const c of res.classes) {
+      if (!moduleMap.has(c.courseCode)) {
+        const credits = c.credits ?? 3;
+        totalCredits += credits;
+        moduleMap.set(c.courseCode, {
+          id: c.id,
+          courseCode: c.courseCode,
+          courseName: c.courseName,
+          credits,
+          semester: c.semester,
+          lecturer: c.lecturer,
+          venue: c.venue,
+          venue_id: c.venue_id,
+          day: c.day,
+          timeSlot: `${c.startTime} - ${c.endTime}`,
+        });
+      }
+    }
+
+    return {
+      success: true,
+      modules: Array.from(moduleMap.values()),
+      totalCredits,
+    };
+  }
+
+  /**
+   * On-demand dynamic venue GPS geofence resolver for location verification
+   */
+  async getVenueDetails(venueId: string): Promise<{
+    success: boolean;
+    venue?: {
+      name: string;
+      building?: string;
+      latitude: number;
+      longitude: number;
+      radiusMeters: number;
+    };
+    message?: string;
+  }> {
+    if (!venueId) {
+      return { success: false, message: 'Venue ID is required' };
+    }
+
+    // 1. Primary: Backend scheduling microservice via Kong
+    try {
+      const response = await apiClient.get(`/scheduling/venues/${venueId}`);
+      if (response.data) {
+        const resolved = this.extractVenueCoordinates(response.data);
+        return { success: true, venue: resolved };
+      }
+    } catch (e: any) {
+      console.log('Backend venue endpoint unavailable, trying Supabase DB fallback:', e?.message);
+    }
+
+    // 2. Resilient direct Supabase DB fallback
+    try {
+      const { data, error } = await supabase
+        .from('venues')
+        .select('*')
+        .eq('id', venueId)
+        .maybeSingle();
+
+      if (!error && data) {
+        const resolved = this.extractVenueCoordinates(data);
+        return { success: true, venue: resolved };
+      }
+    } catch (dbErr) {
+      console.log('Supabase venue query fallback error:', dbErr);
+    }
+
+    return { success: false, message: 'Could not resolve venue coordinates' };
+  }
+
+  private extractVenueCoordinates(venueData: any) {
+    const boundary = venueData.boundary_data || {};
+    let lat = boundary.latitude ?? boundary.center?.lat;
+    let lng = boundary.longitude ?? boundary.center?.lng;
+    let radius = boundary.radius_meters ?? boundary.radius_m ?? 30;
+
+    // If shape is polygon and vertices array is given without explicit center, compute centroid
+    if ((lat === undefined || lng === undefined) && Array.isArray(boundary.vertices) && boundary.vertices.length > 0) {
+      let sumLat = 0;
+      let sumLng = 0;
+      for (const vertex of boundary.vertices) {
+        if (Array.isArray(vertex) && vertex.length >= 2) {
+          sumLat += Number(vertex[0]);
+          sumLng += Number(vertex[1]);
+        }
+      }
+      lat = sumLat / boundary.vertices.length;
+      lng = sumLng / boundary.vertices.length;
+    }
+
+    return {
+      name: venueData.name || 'Lecture Venue',
+      building: venueData.building || 'Campus Hall',
+      latitude: typeof lat === 'number' && !isNaN(lat) ? lat : 6.7951,
+      longitude: typeof lng === 'number' && !isNaN(lng) ? lng : 79.9009,
+      radiusMeters: typeof radius === 'number' && !isNaN(radius) ? radius : 30,
+    };
+  }
+
+  async getSessions() {
+    const res = await this.getEnrolledClasses();
+    return {
+      success: res.success,
+      sessions: res.classes,
+      message: res.message,
+    };
   }
 
   async getAcademicInfo() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data: student } = await supabase
+          .from('students')
+          .select('*, department:departments(*), academic_year:academic_years(*)')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (student) {
+          return {
+            success: true,
+            info: {
+              university: 'University of Moratuwa, Sri Lanka',
+              faculty: student.department?.faculty_name || 'Faculty of Engineering',
+              department: student.department?.name || 'Computer Science & Engineering',
+              term: student.academic_year?.name || 'Academic Term',
+              session: `Academic Year ${new Date().getFullYear()}/${new Date().getFullYear() + 1}`,
+              period: 'Current Semester Session',
+              group: student.department?.name || 'Computer Science & Engineering',
+            },
+          };
+        }
+      }
+    } catch {}
+
     return { success: true, info: mockAcademicInfo };
   }
 
   async getTimetableSchedule(day?: string) {
-    if (day && day !== 'All') {
-      return {
-        success: true,
-        sessions: mockTimetableSchedule.filter(s => s.day.toLowerCase() === day.toLowerCase() || s.id === 'TEST_MOCK_CLASS')
-      };
-    }
-    return { success: true, sessions: mockTimetableSchedule };
+    const res = await this.getEnrolledClasses(day);
+    return {
+      success: res.success,
+      sessions: res.classes,
+      message: res.message,
+    };
   }
 
   async getActiveWindows(sessionId: string) {
@@ -321,19 +621,7 @@ class ApiService {
     } catch (error: any) {
       console.log('Backend active windows check info:', error?.message);
     }
-    
-    // Resilient fallback for test sessions or offline
-    if (sessionId === 'TEST_MOCK_CLASS') {
-      const now = new Date();
-      return {
-        success: true,
-        windows: {
-          check_in_window: { id: 'mock_window_1', start_time: now.toISOString(), end_time: new Date(now.getTime() + 3600000).toISOString() },
-          first_check_in_window: { id: 'mock_window_1', start_time: now.toISOString(), end_time: new Date(now.getTime() + 3600000).toISOString() },
-          random_check_window: null
-        }
-      };
-    }
+
     return { success: false, message: 'Failed to fetch active windows' };
   }
 
@@ -438,7 +726,7 @@ class ApiService {
         }
       }
 
-      if (!storedEmbedding || storedEmbedding.length !== 192) {
+      if (!storedEmbedding || storedEmbedding.length !== EMBEDDING_DIM) {
         return {
           success: false,
           is_match: false,
@@ -449,7 +737,7 @@ class ApiService {
       let dot = 0;
       let normRef = 0;
       let normLive = 0;
-      for (let i = 0; i < 192; i++) {
+      for (let i = 0; i < EMBEDDING_DIM; i++) {
         const r = storedEmbedding[i] || 0;
         const l = embeddingArray[i] || 0;
         dot += r * l;
@@ -471,6 +759,66 @@ class ApiService {
           confidence: Number(similarity.toFixed(4)),
           message: `Face verification failed: Biometric mismatch with registered profile (${(similarity * 100).toFixed(1)}% similarity, requires 70%).`,
         };
+      }
+
+      // Persist attendance in Supabase database
+      try {
+        let lectureSessionId = sessionId;
+
+        // Check if sessionId is an existing lecture_session
+        const { data: existingLectureSession } = await supabase
+          .from('lecture_sessions')
+          .select('id')
+          .eq('id', sessionId)
+          .maybeSingle();
+
+        if (!existingLectureSession?.id) {
+          // If sessionId is a course_offering_id, check for today's session
+          const todayDateStr = new Date().toISOString().split('T')[0];
+          const { data: offeringSession } = await supabase
+            .from('lecture_sessions')
+            .select('id')
+            .eq('course_offering_id', sessionId)
+            .gte('scheduled_at', `${todayDateStr}T00:00:00Z`)
+            .lte('scheduled_at', `${todayDateStr}T23:59:59Z`)
+            .order('scheduled_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (offeringSession?.id) {
+            lectureSessionId = offeringSession.id;
+          } else {
+            // Auto-provision today's lecture session for this course offering
+            const { data: newSession } = await supabase
+              .from('lecture_sessions')
+              .insert({
+                course_offering_id: sessionId,
+                scheduled_at: new Date().toISOString(),
+                duration_mins: 120,
+                status: 'ongoing',
+                held_at: new Date().toISOString(),
+              })
+              .select('id')
+              .maybeSingle();
+
+            if (newSession?.id) {
+              lectureSessionId = newSession.id;
+            }
+          }
+        }
+
+        if (lectureSessionId) {
+          await supabase
+            .from('attendance_records')
+            .upsert({
+              lecture_session_id: lectureSessionId,
+              student_id: studentId,
+              status: 'present',
+              first_check_in_at: new Date().toISOString(),
+            }, { onConflict: 'lecture_session_id,student_id' });
+        }
+      } catch (attErr) {
+        console.warn('Supabase attendance record write note:', attErr);
       }
 
       return {
@@ -496,20 +844,6 @@ class ApiService {
     venue_name?: string;
     message?: string;
   }> {
-    if (sessionId === 'TEST_MOCK_CLASS') {
-      const dist = calculateHaversineDistance(lat, lng, 6.7951, 79.9009);
-      const inside = dist <= 30;
-      return {
-        success: true,
-        inside,
-        distance_meters: dist,
-        radius_meters: 30,
-        venue_name: 'Seminar Room (Test Class)',
-        message: inside
-          ? 'Within 30m geofence'
-          : `Outside 30m geofence (${Math.round(dist)}m away, must be <= 30m)`,
-      };
-    }
 
     try {
       const response = await apiClient.post('/attendance/checkin/verify-location', {
@@ -560,12 +894,9 @@ class ApiService {
   async getHistory() {
     try {
       const response = await apiClient.get('/attendance/me');
-      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-        return { success: true, history: response.data };
-      }
-      return { success: true, history: mockAttendanceHistory };
+      return { success: true, history: response.data || [] };
     } catch (error: any) {
-      return { success: true, history: mockAttendanceHistory, isMock: true };
+      return { success: false, history: [], message: error.response?.data?.detail || error.message || 'Failed to fetch attendance history' };
     }
   }
 
