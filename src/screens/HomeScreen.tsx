@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager, Alert } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager, Alert, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { mockStudent, mockAcademicInfo } from '../services/mockData';
@@ -13,46 +13,86 @@ export default function HomeScreen() {
   const currentStudent = user || mockStudent;
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadTodayClasses = useCallback(async () => {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const currentDay = days[new Date().getDay()];
+    
+    const res = await api.getEnrolledClasses(currentDay);
+    if (res.success && res.classes) {
+      let todaySessions = res.classes.filter((s: any) => s.type !== 'Break' && s.type !== 'Event');
+      
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+      todaySessions = todaySessions.map((s: any) => {
+        const [startHour, startMin] = s.startTime.split(':').map(Number);
+        const [endHour, endMin] = s.endTime.split(':').map(Number);
+        const startTotal = startHour * 60 + startMin;
+        const endTotal = endHour * 60 + endMin;
+        
+        let isActive = false;
+        let isCheckInAllowed = false;
+        let isEnded = false;
+
+        if (endTotal >= startTotal) {
+          // Standard daytime class
+          isActive = currentMinutes >= startTotal && currentMinutes <= endTotal;
+          isCheckInAllowed = currentMinutes >= (startTotal - 15) && currentMinutes <= endTotal;
+          isEnded = currentMinutes > endTotal;
+        } else {
+          // Spans past midnight (e.g., 21:00 to 00:00 or 23:00 to 01:00)
+          isActive = currentMinutes >= startTotal || currentMinutes <= endTotal;
+          isCheckInAllowed = currentMinutes >= (startTotal - 15) || currentMinutes <= endTotal;
+          isEnded = currentMinutes > endTotal && currentMinutes < (startTotal - 15);
+        }
+        
+        return {
+          ...s,
+          isActive,
+          isCheckInAllowed,
+          isEnded,
+        };
+      });
+      
+      setSessions(todaySessions);
+    } else {
+      setSessions([]);
+    }
+  }, []);
 
   useEffect(() => {
     const task = InteractionManager.runAfterInteractions(() => {
       (async () => {
         setLoading(true);
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const currentDay = days[new Date().getDay()];
-        
-        const res = await api.getTimetableSchedule(currentDay);
-        if (res.success && res.sessions) {
-          let todaySessions = res.sessions.filter((s: any) => s.type !== 'Break' && s.type !== 'Event');
-          
-          const now = new Date();
-          const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-          todaySessions = todaySessions.map((s: any) => {
-            const [startHour, startMin] = s.startTime.split(':').map(Number);
-            const [endHour, endMin] = s.endTime.split(':').map(Number);
-            const startTotal = startHour * 60 + startMin;
-            const endTotal = endHour * 60 + endMin;
-            
-            return {
-              ...s,
-              isActive: currentMinutes >= startTotal && currentMinutes <= endTotal,
-              isCheckInAllowed: currentMinutes >= (startTotal - 15) && currentMinutes <= endTotal,
-              isEnded: currentMinutes > endTotal
-            };
-          });
-          
-          setSessions(todaySessions);
-        }
+        await loadTodayClasses();
         setLoading(false);
       })();
     });
 
     return () => task.cancel();
-  }, []);
+  }, [loadTodayClasses]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadTodayClasses();
+    setRefreshing(false);
+  };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          colors={['#4F46E5']}
+          tintColor="#4F46E5"
+        />
+      }
+    >
       {/* Header */}
       <View style={styles.header}>
         <View style={{ flex: 1 }}>

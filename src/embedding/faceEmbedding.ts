@@ -48,13 +48,6 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
       nativeError: error,
     });
 
-    // Only allow mock fallback in automated headless test runners (e.g. Jest)
-    if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
-      console.warn('[Embedding] Running in test environment; using fallback mock model handler.');
-      modelInstance = createMockTfliteModel();
-      return modelInstance;
-    }
-
     throw new Error(
       `Face recognition neural network could not be loaded on this device: ${error?.message || 'Native TFLite initialization failure'}`
     );
@@ -62,44 +55,11 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
 }
 
 /**
- * Creates a mock TfliteModel object for environments where native TFLite binary bindings are unavailable.
+ * Output embedding dimensionality (192D)
  */
-function createMockTfliteModel(): TfliteModel {
-  return {
-    delegates: [],
-    inputs: [{ name: 'input', dataType: 'float32', shape: [1, 112, 112, 3] }],
-    outputs: [{ name: 'output', dataType: 'float32', shape: [1, 192] }],
-    runSync: (inputs: ArrayBuffer[]): ArrayBuffer[] => {
-      return [createMockEmbeddingBuffer(inputs[0])];
-    },
-    run: async (inputs: ArrayBuffer[]): Promise<ArrayBuffer[]> => {
-      // Run asynchronously off UI thread to prevent UI thread freezing
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          resolve([createMockEmbeddingBuffer(inputs[0])]);
-        }, 10);
-      });
-    },
-  } as unknown as TfliteModel;
-}
+export const EMBEDDING_DIM = 192;
 
-/**
- * Generates a deterministic mock 192D raw embedding vector buffer from input tensor buffer.
- */
-function createMockEmbeddingBuffer(inputBuffer?: ArrayBuffer): ArrayBuffer {
-  const output = new Float32Array(192);
-  let seed = 0.5;
-  if (inputBuffer) {
-    const inputFloats = new Float32Array(inputBuffer);
-    for (let i = 0; i < Math.min(inputFloats.length, 100); i++) {
-      seed += Math.abs(inputFloats[i]);
-    }
-  }
-  for (let i = 0; i < 192; i++) {
-    output[i] = Math.sin((i + 1) * seed) + Math.cos(i * 0.5);
-  }
-  return output.buffer;
-}
+
 
 /**
  * Normalizes a single pixel value to Float32 range [-1.0, 1.0] using (pixel - 127.5) / 128.0
@@ -216,17 +176,17 @@ export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Flo
 
   const rawEmbedding = new Float32Array(outputBuffers[0]);
 
-  // Ensure output vector length is 192
-  let vector192: Float32Array;
-  if (rawEmbedding.length === 192) {
-    vector192 = rawEmbedding;
+  // Ensure output vector length matches EMBEDDING_DIM (192)
+  let vector: Float32Array;
+  if (rawEmbedding.length === EMBEDDING_DIM) {
+    vector = rawEmbedding;
   } else {
-    vector192 = new Float32Array(192);
-    vector192.set(rawEmbedding.subarray(0, 192));
+    vector = new Float32Array(EMBEDDING_DIM);
+    vector.set(rawEmbedding.subarray(0, EMBEDDING_DIM));
   }
 
   // 3. Apply L2 unit normalization (v / sqrt(sum(v_i^2)))
-  const normalizedVector = l2Normalize(vector192);
+  const normalizedVector = l2Normalize(vector);
 
   return normalizedVector;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   ScrollView,
   InteractionManager,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -22,6 +23,8 @@ const DAYS = [
   { key: 'Wednesday', label: 'Wed' },
   { key: 'Thursday', label: 'Thu' },
   { key: 'Friday', label: 'Fri' },
+  { key: 'Saturday', label: 'Sat' },
+  { key: 'Sunday', label: 'Sun' },
   { key: 'All', label: 'All' },
 ];
 
@@ -31,45 +34,61 @@ export default function TimetableScreen() {
   const [sessions, setSessions] = useState<ClassSession[]>([]);
   const [academicInfo, setAcademicInfo] = useState<AcademicHeaderInfo>(mockAcademicInfo);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Auto-select today's day of week (Monday-Friday) or default to Monday
+  // Auto-select today's day of week or default to Monday
   const currentDayName = useMemo(() => {
     const dayIndex = new Date().getDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
     const dayMap: { [key: number]: string } = {
+      0: 'Sunday',
       1: 'Monday',
       2: 'Tuesday',
       3: 'Wednesday',
       4: 'Thursday',
       5: 'Friday',
+      6: 'Saturday',
     };
     return dayMap[dayIndex] || 'Monday';
   }, []);
 
   const [selectedDay, setSelectedDay] = useState<string>(currentDayName);
 
+  const loadData = useCallback(async () => {
+    const [classRes, infoRes] = await Promise.all([
+      api.getEnrolledClasses(),
+      api.getAcademicInfo(),
+    ]);
+
+    if (classRes.success && classRes.classes) {
+      setSessions(classRes.classes);
+    }
+    if (infoRes.success && infoRes.info) {
+      setAcademicInfo(infoRes.info);
+    }
+  }, []);
+
   useEffect(() => {
     const task = InteractionManager.runAfterInteractions(() => {
       (async () => {
         setLoading(true);
-        const res = await api.getSessions();
-        if (res.success && res.sessions) {
-          setSessions(res.sessions);
-        }
-        const infoRes = await api.getAcademicInfo();
-        if (infoRes.success && infoRes.info) {
-          setAcademicInfo(infoRes.info);
-        }
+        await loadData();
         setLoading(false);
       })();
     });
 
     return () => task.cancel();
-  }, []);
+  }, [loadData]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  };
 
   const filteredSessions = useMemo(() => {
     let currentSessions = sessions;
     if (selectedDay !== 'All') {
-      currentSessions = sessions.filter(s => s.day === selectedDay);
+      currentSessions = sessions.filter(s => (s.day || '').toLowerCase() === selectedDay.toLowerCase());
     }
     
     const now = new Date();
@@ -82,7 +101,11 @@ export default function TimetableScreen() {
         const [endHour, endMin] = s.endTime.split(':').map(Number);
         const startTotal = startHour * 60 + startMin;
         const endTotal = endHour * 60 + endMin;
-        isActive = currentMinutes >= startTotal && currentMinutes <= endTotal;
+        if (endTotal >= startTotal) {
+          isActive = currentMinutes >= startTotal && currentMinutes <= endTotal;
+        } else {
+          isActive = currentMinutes >= startTotal || currentMinutes <= endTotal;
+        }
       }
       return {
         ...s,
@@ -226,11 +249,34 @@ export default function TimetableScreen() {
         keyExtractor={item => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#4F46E5']}
+            tintColor="#4F46E5"
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="calendar-clear-outline" size={48} color="#9CA3AF" />
-            <Text style={styles.emptyTitle}>No Classes Scheduled</Text>
-            <Text style={styles.emptySubtitle}>Enjoy your free time or use this time for self-study!</Text>
+            <Text style={styles.emptyTitle}>No Classes Scheduled for {selectedDay}</Text>
+            <Text style={styles.emptySubtitle}>Enjoy your free time or pull down to refresh classes.</Text>
+            <TouchableOpacity
+              style={{
+                marginTop: 14,
+                backgroundColor: '#EEF2FF',
+                paddingVertical: 10,
+                paddingHorizontal: 18,
+                borderRadius: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+              }}
+              onPress={onRefresh}
+            >
+              <Ionicons name="sync-outline" size={16} color="#4F46E5" style={{ marginRight: 6 }} />
+              <Text style={{ color: '#4F46E5', fontWeight: '600', fontSize: 14 }}>Sync Enrolled Classes</Text>
+            </TouchableOpacity>
           </View>
         }
         renderItem={({ item, index }) => {

@@ -4,7 +4,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../services/api';
-import { mockTimetableSchedule } from '../services/mockData';
+
 import {
   calculateHaversineDistance,
   formatDistance,
@@ -35,6 +35,7 @@ export default function LocationCheckScreen() {
   const sessionId = route.params?.sessionId;
   const sessionParam = route.params?.session;
 
+
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [venue, setVenue] = useState<TargetVenue>(DEFAULT_VENUE);
@@ -47,12 +48,28 @@ export default function LocationCheckScreen() {
 
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
 
-  // 1. Resolve venue coordinates from session parameters, timetable, or active window API
+  // 1. Resolve venue coordinates on-demand from venue_id, parameters, or active windows
   useEffect(() => {
     (async () => {
       let resolvedVenue: TargetVenue = { ...DEFAULT_VENUE };
 
-      if (sessionParam?.geofence) {
+      // On-demand venue details resolution from database
+      if (sessionParam?.venue_id) {
+        try {
+          const venueRes = await api.getVenueDetails(sessionParam.venue_id);
+          if (venueRes?.success && venueRes?.venue) {
+            resolvedVenue = {
+              name: venueRes.venue.name || sessionParam.venue || DEFAULT_VENUE.name,
+              building: venueRes.venue.building || 'Campus Lecture Venue',
+              latitude: venueRes.venue.latitude,
+              longitude: venueRes.venue.longitude,
+              radiusMeters: venueRes.venue.radiusMeters || DEFAULT_GEOFENCE_RADIUS_METERS,
+            };
+          }
+        } catch (vErr) {
+          console.log('[LocationCheckScreen] On-demand venue resolve note:', vErr);
+        }
+      } else if (sessionParam?.geofence) {
         resolvedVenue = {
           name: sessionParam.venue || sessionParam.courseName || DEFAULT_VENUE.name,
           building: 'Campus Lecture Venue',
@@ -60,20 +77,9 @@ export default function LocationCheckScreen() {
           longitude: sessionParam.geofence.longitude,
           radiusMeters: DEFAULT_GEOFENCE_RADIUS_METERS, // Strict 30m
         };
-      } else {
-        const found = mockTimetableSchedule.find((s) => s.id === sessionId);
-        if (found?.geofence) {
-          resolvedVenue = {
-            name: found.venue,
-            building: 'CSE Department',
-            latitude: found.geofence.latitude,
-            longitude: found.geofence.longitude,
-            radiusMeters: DEFAULT_GEOFENCE_RADIUS_METERS,
-          };
-        }
       }
 
-      // Query active windows to check if backend provided dynamic venue geofence
+      // Query active windows to check if backend provided dynamic lecture venue override
       try {
         const winRes = await api.getActiveWindows(sessionId);
         if (winRes?.success && winRes?.windows?.venue_geofence) {
@@ -98,6 +104,8 @@ export default function LocationCheckScreen() {
   const evaluateLocation = useCallback(
     (loc: Location.LocationObject, target: TargetVenue) => {
       setLocation(loc);
+
+
       const dist = calculateHaversineDistance(
         loc.coords.latitude,
         loc.coords.longitude,
@@ -193,10 +201,11 @@ export default function LocationCheckScreen() {
     setStatusText('Validating coordinates with server...');
 
     try {
+
       const res = await api.verifyLocation(
         sessionId,
-        location.coords.latitude,
-        location.coords.longitude
+        location!.coords.latitude,
+        location!.coords.longitude
       );
 
       if (res.success && res.inside) {
@@ -204,8 +213,8 @@ export default function LocationCheckScreen() {
         navigation.replace('CheckIn', {
           sessionId,
           session: sessionParam,
-          lat: location.coords.latitude,
-          lng: location.coords.longitude,
+          lat: location!.coords.latitude,
+          lng: location!.coords.longitude,
         });
       } else {
         Alert.alert(
@@ -265,9 +274,11 @@ export default function LocationCheckScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Lecture Hall Proximity</Text>
+          <Text style={styles.title}>
+            {'Lecture Hall Proximity'}
+          </Text>
           <Text style={styles.subtitle}>
-            You must be within 30 meters of the lecture hall to check in.
+            {'You must be within 30 meters of the lecture hall to check in.'}
           </Text>
         </View>
 
@@ -282,7 +293,9 @@ export default function LocationCheckScreen() {
             {venue.building ? <Text style={styles.venueBuilding}>{venue.building}</Text> : null}
             <View style={styles.perimeterRow}>
               <Ionicons name="shield-checkmark" size={14} color="#10B981" style={{ marginRight: 4 }} />
-              <Text style={styles.perimeterText}>Geofence Perimeter: {venue.radiusMeters}m radius</Text>
+              <Text style={styles.perimeterText}>
+                {`Geofence Perimeter: ${venue.radiusMeters}m radius`}
+              </Text>
             </View>
           </View>
         </View>
@@ -355,7 +368,7 @@ export default function LocationCheckScreen() {
                   accuracyOk ? { color: '#059669' } : { color: '#D97706' },
                 ]}
               >
-                Accuracy: {accuracyValue !== null ? `±${accuracyValue}m` : '--'}
+                {`Accuracy: ${accuracyValue !== null ? `±${accuracyValue}m` : '--'}`}
               </Text>
             </View>
           </View>
@@ -389,10 +402,10 @@ export default function LocationCheckScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.checkboxLabel, !inRange && { color: '#9CA3AF' }]}>
-              I confirm I am physically present in {venue.name}
+              {`I confirm I am physically present in ${venue.name}`}
             </Text>
             <Text style={styles.checkboxSubtext}>
-              Location spoofing or proxy check-in attempts are logged for disciplinary review.
+              {'Location spoofing or proxy check-in attempts are logged for disciplinary review.'}
             </Text>
           </View>
         </TouchableOpacity>

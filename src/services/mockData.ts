@@ -29,6 +29,8 @@ export interface StudentProfile {
 
 export type SessionType = 'L' | 'P' | 'L & P' | 'Event' | 'Break';
 
+export type WeekDay = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+
 export interface ClassSession {
   id: string;
   courseCode: string;
@@ -37,17 +39,36 @@ export interface ClassSession {
   type: SessionType;
   typeLabel: string;
   venue: string;
-  day: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday';
-  dayIndex: number; // 1 = Monday, 5 = Friday
+  venue_id?: string;
+  day: WeekDay;
+  dayIndex: number; // 1 = Monday ... 7 = Sunday
   startTime: string;
   endTime: string;
   duration: string;
   isActive: boolean;
-  geofence: {
+  credits?: number;
+  semester?: string;
+  offeringCode?: string;
+  geofence?: {
     latitude: number;
     longitude: number;
     radiusInMeters: number;
   };
+}
+
+export interface EnrolledModule {
+  id: string;
+  courseCode: string;
+  courseName: string;
+  credits?: number;
+  department?: string;
+  semester?: string;
+  academicYear?: string;
+  lecturer?: string;
+  venue?: string;
+  venue_id?: string;
+  day?: string;
+  timeSlot?: string;
 }
 
 export interface AcademicHeaderInfo {
@@ -431,24 +452,6 @@ export const mockTimetableSchedule: ClassSession[] = [
     endTime: '15:15',
     duration: '2h',
     isActive: false,
-    geofence: UOM_CSE_COORDS,
-  },
-
-  // --- ALWAYS AVAILABLE MOCK CLASS FOR TESTING ---
-  {
-    id: 'TEST_MOCK_CLASS',
-    courseCode: 'TEST0000',
-    courseName: 'Testing & Debugging (Mock)',
-    lecturer: 'System',
-    type: 'L',
-    typeLabel: 'Mock (L)',
-    venue: 'Anywhere',
-    day: 'Everyday' as any,
-    dayIndex: 0,
-    startTime: '00:00',
-    endTime: '23:59',
-    duration: '24h',
-    isActive: true,
     geofence: UOM_CSE_COORDS,
   },
 ];
