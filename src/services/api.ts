@@ -311,7 +311,7 @@ class ApiService {
               pose_embeddings: posesArray || null,
               depth_features: depthFeatures || null,
               enrollment_metadata: enrollmentMetadata || null,
-              enrollment_version: 3,
+              enrollment_version: 5,
               reference_photo_url: `https://storage.example.com/faces/${studentId}.jpg`,
               quality_score: qualityScore,
               is_active: true,
@@ -605,13 +605,58 @@ class ApiService {
     };
   }
 
-  async getActiveWindows(sessionId: string) {
+  /**
+   * Resolves a sessionId (which may be a course_offering_id or lecture_session_id)
+   * to a valid lecture_sessions ID.
+   */
+  async resolveLectureSession(sessionId: string): Promise<string> {
+    if (!sessionId || sessionId === 'TEST_MOCK_CLASS' || !sessionId.includes('-')) {
+      return sessionId;
+    }
+
     try {
-      const response = await apiClient.get(`/attendance/checkin/windows/active?lecture_session_id=${sessionId}`);
+      // 1. Check if sessionId already exists as a lecture_session in Supabase
+      const { data: existingLectureSession } = await supabase
+        .from('lecture_sessions')
+        .select('id')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (existingLectureSession?.id) {
+        return existingLectureSession.id;
+      }
+
+      // 2. If sessionId is a course_offering_id, check for today's session
+      const todayDateStr = new Date().toISOString().split('T')[0];
+      const { data: offeringSession } = await supabase
+        .from('lecture_sessions')
+        .select('id, status')
+        .eq('course_offering_id', sessionId)
+        .gte('scheduled_at', `${todayDateStr}T00:00:00Z`)
+        .lte('scheduled_at', `${todayDateStr}T23:59:59Z`)
+        .order('scheduled_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (offeringSession?.id) {
+        return offeringSession.id;
+      }
+    } catch (err) {
+      console.log('[api.resolveLectureSession] Resolution note:', err);
+    }
+
+    return sessionId;
+  }
+
+  async getActiveWindows(sessionId: string) {
+    const resolvedId = await this.resolveLectureSession(sessionId);
+    try {
+      const response = await apiClient.get(`/attendance/checkin/windows/active?lecture_session_id=${resolvedId}`);
       if (response.data) {
         const data = response.data;
         return {
           success: true,
+          lecture_session_id: data.lecture_session_id || resolvedId,
           windows: {
             ...data,
             first_check_in_window: data.first_check_in_window || data.check_in_window,
@@ -622,7 +667,7 @@ class ApiService {
       console.log('Backend active windows check info:', error?.message);
     }
 
-    return { success: false, message: 'Failed to fetch active windows' };
+    return { success: false, lecture_session_id: resolvedId, message: 'Failed to fetch active windows' };
   }
 
   async checkInWithFace(
@@ -630,7 +675,8 @@ class ApiService {
     windowId: string,
     lat?: number,
     lng?: number,
-    faceEmbedding?: Float32Array | number[]
+    faceEmbedding?: Float32Array | number[],
+    depthFeatures?: number[]
   ): Promise<{
     success: boolean;
     is_match?: boolean;
@@ -643,22 +689,25 @@ class ApiService {
       return { success: false, is_match: false, message: 'No face biometric embedding provided' };
     }
 
+    const resolvedSessionId = await this.resolveLectureSession(sessionId);
     const embeddingArray = Array.from(faceEmbedding);
 
-    // 1. Primary: Verify face against backend database via attendance-service API
+    // Primary & Exclusive: Verify face and record attendance through server validation gates
     try {
       const response = await apiClient.post('/attendance/checkin/verify-face', {
-        lecture_session_id: sessionId,
+        lecture_session_id: resolvedSessionId,
         verification_window_id: windowId,
         latitude: lat,
         longitude: lng,
         face_embedding: embeddingArray,
+        depth_features: depthFeatures,
       });
 
       const resData = response.data;
       const isMatch = Boolean(resData?.is_match);
+      const isSuccess = Boolean(resData?.success ?? isMatch);
       return {
-        success: isMatch,
+        success: isSuccess && isMatch,
         is_match: isMatch,
         confidence: resData?.confidence,
         requires_re_registration: Boolean(resData?.requires_re_registration),
@@ -671,167 +720,13 @@ class ApiService {
         return {
           success: false,
           is_match: false,
-          message: errorDetail || 'Face verification rejected by backend database',
+          message: errorDetail || 'Face verification rejected by backend attendance service',
         };
       }
-      console.log('Backend attendance service unavailable, attempting resilient Supabase DB verification fallback:', error?.message);
-    }
-
-    // 2. Resilient Direct Supabase Database Fallback
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const studentId = session?.user?.id;
-      if (!studentId) {
-        return { success: false, is_match: false, message: 'Student is not authenticated.' };
-      }
-
-      // Query active registered face profile from Supabase PostgreSQL database
-      const { data: profile, error: profileErr } = await supabase
-        .from('face_profiles')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('is_active', true)
-        .order('registered_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (profileErr || !profile || !profile.embedding) {
-        return {
-          success: false,
-          is_match: false,
-          message: 'No active face biometric profile registered for student in database. Please register your face first.',
-        };
-      }
-
-      // Check for legacy biometric profile (< v3)
-      const enrollmentVersion = Number(profile.enrollment_version || 1);
-      if (enrollmentVersion < 3) {
-        return {
-          success: false,
-          is_match: false,
-          requires_re_registration: true,
-          message: 'Biometric profile upgrade required. Please re-register your face.',
-        };
-      }
-
-      // Compute in-memory cosine similarity against stored pgvector embedding
-      let storedEmbedding: number[] = [];
-      if (Array.isArray(profile.embedding)) {
-        storedEmbedding = profile.embedding;
-      } else if (typeof profile.embedding === 'string') {
-        try {
-          storedEmbedding = JSON.parse(profile.embedding);
-        } catch {
-          storedEmbedding = profile.embedding.replace(/[\[\]]/g, '').split(',').map(Number);
-        }
-      }
-
-      if (!storedEmbedding || storedEmbedding.length !== EMBEDDING_DIM) {
-        return {
-          success: false,
-          is_match: false,
-          message: 'Invalid stored biometric embedding format in database.',
-        };
-      }
-
-      let dot = 0;
-      let normRef = 0;
-      let normLive = 0;
-      for (let i = 0; i < EMBEDDING_DIM; i++) {
-        const r = storedEmbedding[i] || 0;
-        const l = embeddingArray[i] || 0;
-        dot += r * l;
-        normRef += r * r;
-        normLive += l * l;
-      }
-
-      const similarity = (normRef > 0 && normLive > 0)
-        ? dot / (Math.sqrt(normRef) * Math.sqrt(normLive))
-        : 0;
-
-      const threshold = 0.70;
-      const isMatch = similarity >= threshold;
-
-      if (!isMatch) {
-        return {
-          success: false,
-          is_match: false,
-          confidence: Number(similarity.toFixed(4)),
-          message: `Face verification failed: Biometric mismatch with registered profile (${(similarity * 100).toFixed(1)}% similarity, requires 70%).`,
-        };
-      }
-
-      // Persist attendance in Supabase database
-      try {
-        let lectureSessionId = sessionId;
-
-        // Check if sessionId is an existing lecture_session
-        const { data: existingLectureSession } = await supabase
-          .from('lecture_sessions')
-          .select('id')
-          .eq('id', sessionId)
-          .maybeSingle();
-
-        if (!existingLectureSession?.id) {
-          // If sessionId is a course_offering_id, check for today's session
-          const todayDateStr = new Date().toISOString().split('T')[0];
-          const { data: offeringSession } = await supabase
-            .from('lecture_sessions')
-            .select('id')
-            .eq('course_offering_id', sessionId)
-            .gte('scheduled_at', `${todayDateStr}T00:00:00Z`)
-            .lte('scheduled_at', `${todayDateStr}T23:59:59Z`)
-            .order('scheduled_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (offeringSession?.id) {
-            lectureSessionId = offeringSession.id;
-          } else {
-            // Auto-provision today's lecture session for this course offering
-            const { data: newSession } = await supabase
-              .from('lecture_sessions')
-              .insert({
-                course_offering_id: sessionId,
-                scheduled_at: new Date().toISOString(),
-                duration_mins: 120,
-                status: 'ongoing',
-                held_at: new Date().toISOString(),
-              })
-              .select('id')
-              .maybeSingle();
-
-            if (newSession?.id) {
-              lectureSessionId = newSession.id;
-            }
-          }
-        }
-
-        if (lectureSessionId) {
-          await supabase
-            .from('attendance_records')
-            .upsert({
-              lecture_session_id: lectureSessionId,
-              student_id: studentId,
-              status: 'present',
-              first_check_in_at: new Date().toISOString(),
-            }, { onConflict: 'lecture_session_id,student_id' });
-        }
-      } catch (attErr) {
-        console.warn('Supabase attendance record write note:', attErr);
-      }
-
-      return {
-        success: true,
-        is_match: true,
-        confidence: Number(similarity.toFixed(4)),
-        message: 'Face verified successfully against registered database profile. Attendance recorded.',
-      };
-    } catch (fallbackError: any) {
       return {
         success: false,
         is_match: false,
-        message: 'Failed to verify face with backend database. Please check connection.',
+        message: errorDetail || error.message || 'Face verification service unavailable. Please check your connection and try again.',
       };
     }
   }
@@ -842,12 +737,14 @@ class ApiService {
     distance_meters?: number;
     radius_meters?: number;
     venue_name?: string;
+    lecture_session_id?: string;
     message?: string;
   }> {
+    const resolvedId = await this.resolveLectureSession(sessionId);
 
     try {
       const response = await apiClient.post('/attendance/checkin/verify-location', {
-        lecture_session_id: sessionId,
+        lecture_session_id: resolvedId,
         latitude: lat,
         longitude: lng,
       });
@@ -858,15 +755,21 @@ class ApiService {
         distance_meters: data?.distance_meters,
         radius_meters: data?.radius_meters || 30,
         venue_name: data?.venue_name,
+        lecture_session_id: data?.lecture_session_id || resolvedId,
         message: data?.inside
           ? 'Location verified within geofence'
-          : `Outside geofence (${Math.round(data?.distance_meters || 0)}m away, must be <= 30m)`,
+          : `Outside geofence (${Math.round(data?.distance_meters || 0)}m away, must be <= ${Math.round(data?.radius_meters || 30)}m)`,
       };
     } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Location verification failed';
+      const errorDetail = error.response?.data?.detail;
+      let msg = errorDetail || error.message || 'Location verification failed';
+      if (errorDetail === 'Lecture session not found' || error.response?.status === 404) {
+        msg = 'Lecture session is not yet active on the server. Please ensure the class has started or retry in a moment.';
+      }
       return {
         success: false,
         inside: false,
+        lecture_session_id: resolvedId,
         message: msg,
       };
     }

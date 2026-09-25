@@ -181,12 +181,12 @@ export function runEnrollmentTests(): { passed: number; failed: number } {
 
   // 5. Centroid Embedding Tests
   {
-    const v1 = l2Normalize(new Float32Array(192).fill(1.0));
-    const v2 = l2Normalize(new Float32Array(192).fill(0.8));
-    const v3 = l2Normalize(new Float32Array(192).fill(1.2));
+    const v1 = l2Normalize(new Float32Array(512).fill(1.0));
+    const v2 = l2Normalize(new Float32Array(512).fill(0.8));
+    const v3 = l2Normalize(new Float32Array(512).fill(1.2));
 
     const centroid = computeCentroidEmbedding([v1, v2, v3]);
-    assert(centroid.length === 192, 'Centroid: Dimension is 192');
+    assert(centroid.length === 512, 'Centroid: Dimension is 512');
 
     let sumSq = 0;
     for (let i = 0; i < centroid.length; i++) {

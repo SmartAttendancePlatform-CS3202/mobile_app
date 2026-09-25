@@ -13,16 +13,16 @@ export type ImageInput = ImageBuffer | Uint8Array | Uint8ClampedArray | Float32A
 let modelInstance: TfliteModel | null = null;
 
 /**
- * Loads the MobileFaceNet TFLite model using react-native-fast-tflite.
+ * Loads the FaceNet 512D TFLite model using react-native-fast-tflite.
  * Resolves local file URI using expo-asset to ensure reliable Android APK loading.
  */
-export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
+export async function loadFaceModel(): Promise<TfliteModel> {
   if (modelInstance) {
     return modelInstance;
   }
 
   try {
-    const modelModule = require('../../assets/models/mobilefacenet.tflite');
+    const modelModule = require('../../assets/models/facenet_512.tflite');
     let modelSource: any = modelModule;
 
     try {
@@ -31,7 +31,7 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
         const resolvedUri = assets[0].localUri || assets[0].uri;
         if (resolvedUri) {
           modelSource = { url: resolvedUri };
-          console.log('[Embedding] Resolved MobileFaceNet asset URI:', resolvedUri);
+          console.log('[Embedding] Resolved FaceNet 512D asset URI:', resolvedUri);
         }
       }
     } catch (assetErr) {
@@ -39,10 +39,10 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
     }
 
     modelInstance = await loadTensorflowModel(modelSource, []);
-    console.log('[Embedding] MobileFaceNet TFLite model loaded successfully via native engine.');
+    console.log('[Embedding] FaceNet 512D TFLite model loaded successfully via native engine.');
     return modelInstance;
   } catch (error: any) {
-    console.error('[Embedding] Native MobileFaceNet TFLite model load FAILED:', {
+    console.error('[Embedding] Native FaceNet 512D TFLite model load FAILED:', {
       message: error?.message,
       stack: error?.stack,
       nativeError: error,
@@ -55,11 +55,19 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
 }
 
 /**
- * Output embedding dimensionality (192D)
+ * Backwards-compatible alias for existing callers
  */
-export const EMBEDDING_DIM = 192;
+export const loadMobileFaceNetModel = loadFaceModel;
 
+/**
+ * Output embedding dimensionality (512D)
+ */
+export const EMBEDDING_DIM = 512;
 
+/**
+ * Native model input spatial resolution (160x160 for FaceNet)
+ */
+export const MODEL_INPUT_SIZE = 160;
 
 /**
  * Normalizes a single pixel value to Float32 range [-1.0, 1.0] using (pixel - 127.5) / 128.0
@@ -69,18 +77,17 @@ export function normalizePixel(pixel: number): number {
 }
 
 /**
- * Preprocesses and resizes/aligns face image to 112x112 tensor shape [1, 112, 112, 3]
- * with Float32 normalization (pixel - 127.5) / 128.0.
+ * Preprocesses and resizes/aligns face image to target tensor shape [1, targetSize, targetSize, 3]
+ * with Float32 normalization (pixel - 127.5) / 128.0. Defaults to 160x160 (76,800 floats).
  */
-export function preprocessFaceTo112x112(input: ImageInput): Float32Array {
-  const TARGET_SIZE = 112;
+export function preprocessFaceToTensor(input: ImageInput, targetSize: number = MODEL_INPUT_SIZE): Float32Array {
   const CHANNELS = 3;
-  const TOTAL_FLOATS = 1 * TARGET_SIZE * TARGET_SIZE * CHANNELS; // 37632 elements
+  const TOTAL_FLOATS = 1 * targetSize * targetSize * CHANNELS;
   const tensor = new Float32Array(TOTAL_FLOATS);
 
   if (input instanceof Float32Array) {
     if (input.length === TOTAL_FLOATS) {
-      // If already length 37632, verify whether it needs normalization or is pre-normalized
+      // If already correct length, verify whether it needs normalization or is pre-normalized
       let isRawPixel = false;
       for (let i = 0; i < Math.min(input.length, 20); i++) {
         if (input[i] > 1.0 || input[i] < -1.0) {
@@ -100,8 +107,8 @@ export function preprocessFaceTo112x112(input: ImageInput): Float32Array {
   }
 
   let data: Uint8Array | Uint8ClampedArray | Float32Array;
-  let srcWidth = TARGET_SIZE;
-  let srcHeight = TARGET_SIZE;
+  let srcWidth = targetSize;
+  let srcHeight = targetSize;
   let srcChannels = CHANNELS;
 
   if ('data' in input && typeof input.width === 'number' && typeof input.height === 'number') {
@@ -111,20 +118,28 @@ export function preprocessFaceTo112x112(input: ImageInput): Float32Array {
     srcChannels = input.channels || 4;
   } else {
     data = input as Uint8Array | Uint8ClampedArray | Float32Array;
-    if (data.length === TARGET_SIZE * TARGET_SIZE * 4) {
+    if (data.length === targetSize * targetSize * 4) {
       srcChannels = 4;
-    } else if (data.length === TARGET_SIZE * TARGET_SIZE * 3) {
+    } else if (data.length === targetSize * targetSize * 3) {
+      srcChannels = 3;
+    } else if (data.length === 112 * 112 * 4) {
+      srcWidth = 112;
+      srcHeight = 112;
+      srcChannels = 4;
+    } else if (data.length === 112 * 112 * 3) {
+      srcWidth = 112;
+      srcHeight = 112;
       srcChannels = 3;
     }
   }
 
-  // Nearest-neighbor / bilinear interpolation mapping to 112x112 Float32 RGB tensor
-  for (let y = 0; y < TARGET_SIZE; y++) {
-    const srcY = Math.floor((y / TARGET_SIZE) * srcHeight);
-    for (let x = 0; x < TARGET_SIZE; x++) {
-      const srcX = Math.floor((x / TARGET_SIZE) * srcWidth);
+  // Nearest-neighbor / bilinear interpolation mapping to Float32 RGB tensor
+  for (let y = 0; y < targetSize; y++) {
+    const srcY = Math.floor((y / targetSize) * srcHeight);
+    for (let x = 0; x < targetSize; x++) {
+      const srcX = Math.floor((x / targetSize) * srcWidth);
       const srcIndex = (srcY * srcWidth + srcX) * srcChannels;
-      const targetIndex = (y * TARGET_SIZE + x) * CHANNELS;
+      const targetIndex = (y * targetSize + x) * CHANNELS;
 
       const r = data[srcIndex] ?? 0;
       const g = data[srcIndex + 1] ?? 0;
@@ -137,6 +152,13 @@ export function preprocessFaceTo112x112(input: ImageInput): Float32Array {
   }
 
   return tensor;
+}
+
+/**
+ * Backwards-compatible alias for 112x112 preprocessor
+ */
+export function preprocessFaceTo112x112(input: ImageInput): Float32Array {
+  return preprocessFaceToTensor(input, 112);
 }
 
 /**
@@ -159,13 +181,13 @@ export function l2Normalize(vector: Float32Array): Float32Array {
 }
 
 /**
- * Runs MobileFaceNet inference asynchronously off the UI thread and returns 192D L2-normalized Float32Array.
+ * Runs FaceNet inference asynchronously off the UI thread and returns 512D L2-normalized Float32Array.
  */
 export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Float32Array> {
-  const model = await loadMobileFaceNetModel();
+  const model = await loadFaceModel();
 
-  // 1. Face alignment / resize to 112x112 shape [1, 112, 112, 3] with Float32 normalization (pixel - 127.5) / 128.0
-  const inputTensor = preprocessFaceTo112x112(imageInput);
+  // 1. Face alignment / resize to 160x160 shape [1, 160, 160, 3] with Float32 normalization (pixel - 127.5) / 128.0
+  const inputTensor = preprocessFaceToTensor(imageInput, MODEL_INPUT_SIZE);
 
   // 2. Run TFLite inference asynchronously off the UI thread
   const outputBuffers = await model.run([inputTensor.buffer as ArrayBuffer]);
@@ -174,9 +196,25 @@ export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Flo
     throw new Error('[Embedding] Model inference returned no output buffers.');
   }
 
-  const rawEmbedding = new Float32Array(outputBuffers[0]);
+  const outputType = (model as any).outputs?.[0]?.dataType;
+  let rawEmbedding: Float32Array;
 
-  // Ensure output vector length matches EMBEDDING_DIM (192)
+  if (outputType === 'uint8' || outputType === 'int8') {
+    const scale = (model as any).outputs[0].quantizationParams?.scale || 1.0;
+    const zeroPoint = (model as any).outputs[0].quantizationParams?.zeroPoint || 0;
+    const quantizedBuffer = outputType === 'uint8' 
+        ? new Uint8Array(outputBuffers[0]) 
+        : new Int8Array(outputBuffers[0]);
+    
+    rawEmbedding = new Float32Array(quantizedBuffer.length);
+    for (let i = 0; i < quantizedBuffer.length; i++) {
+      rawEmbedding[i] = (quantizedBuffer[i] - zeroPoint) * scale;
+    }
+  } else {
+    rawEmbedding = new Float32Array(outputBuffers[0]);
+  }
+
+  // Ensure output vector length matches EMBEDDING_DIM (512)
   let vector: Float32Array;
   if (rawEmbedding.length === EMBEDDING_DIM) {
     vector = rawEmbedding;

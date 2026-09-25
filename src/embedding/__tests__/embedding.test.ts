@@ -1,8 +1,11 @@
 import {
+  preprocessFaceToTensor,
   preprocessFaceTo112x112,
   l2Normalize,
   normalizePixel,
   generateFaceEmbedding,
+  MODEL_INPUT_SIZE,
+  EMBEDDING_DIM,
   ImageBuffer,
 } from '../faceEmbedding';
 
@@ -29,16 +32,16 @@ export function runEmbeddingTests(): { passed: number; failed: number } {
 
   console.log('--- Starting 512D Face Embedding & API Module Tests ---');
 
-  // Test 1: 112x112 Face Input Normalization (pixel - 127.5) / 128.0
+  // Test 1: 160x160 Face Input Normalization (pixel - 127.5) / 128.0
   {
     // Test direct pixel normalization values
     assert(Math.abs(normalizePixel(0) - (-127.5 / 128.0)) < 1e-6, 'Normalization: Pixel 0 maps to -0.99609375');
     assert(Math.abs(normalizePixel(255) - (127.5 / 128.0)) < 1e-6, 'Normalization: Pixel 255 maps to 0.99609375');
     assert(Math.abs(normalizePixel(127.5) - 0.0) < 1e-6, 'Normalization: Midpoint pixel 127.5 maps to 0.0');
 
-    // Create 112x112 RGBA image buffer (112 * 112 * 4 bytes)
-    const width = 112;
-    const height = 112;
+    // Create 160x160 RGBA image buffer (160 * 160 * 4 bytes)
+    const width = 160;
+    const height = 160;
     const data = new Uint8Array(width * height * 4);
 
     // Fill with sample pixel pattern
@@ -50,10 +53,10 @@ export function runEmbeddingTests(): { passed: number; failed: number } {
     }
 
     const imgBuffer: ImageBuffer = { data, width, height, channels: 4 };
-    const tensor = preprocessFaceTo112x112(imgBuffer);
+    const tensor = preprocessFaceToTensor(imgBuffer);
 
     assert(tensor instanceof Float32Array, 'Normalization: Preprocessed output is Float32Array');
-    assert(tensor.length === 1 * 112 * 112 * 3, 'Normalization: Output tensor shape is [1, 112, 112, 3] (37632 elements)');
+    assert(tensor.length === 1 * 160 * 160 * 3, 'Normalization: Output tensor shape is [1, 160, 160, 3] (76800 elements)');
 
     // Verify first pixel R, G, B normalized values
     const normR = tensor[0];
@@ -73,6 +76,10 @@ export function runEmbeddingTests(): { passed: number; failed: number } {
       }
     }
     assert(allInRange, 'Normalization: All tensor elements are bounded within [-1.0, 1.0]');
+
+    // Verify backwards-compatibility alias
+    const tensor112 = preprocessFaceTo112x112(imgBuffer);
+    assert(tensor112.length === 112 * 112 * 3, 'Backwards-compatibility: preprocessFaceTo112x112 outputs 37632 elements');
   }
 
   // Test 2: L2 Vector Unit Length Normalization (norm == 1.0)

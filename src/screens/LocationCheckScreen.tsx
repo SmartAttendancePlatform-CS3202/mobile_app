@@ -1,5 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  AppState,
+  Linking,
+} from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
@@ -47,6 +57,11 @@ export default function LocationCheckScreen() {
   const [statusText, setStatusText] = useState('Initializing location...');
 
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
+  const venueRef = useRef<TargetVenue>(DEFAULT_VENUE);
+
+  useEffect(() => {
+    venueRef.current = venue;
+  }, [venue]);
 
   // 1. Resolve venue coordinates on-demand from venue_id, parameters, or active windows
   useEffect(() => {
@@ -97,6 +112,13 @@ export default function LocationCheckScreen() {
       }
 
       setVenue(resolvedVenue);
+      venueRef.current = resolvedVenue;
+      setLocation((currentLoc) => {
+        if (currentLoc) {
+          evaluateLocation(currentLoc, resolvedVenue);
+        }
+        return currentLoc;
+      });
     })();
   }, [sessionId, sessionParam]);
 
@@ -104,7 +126,6 @@ export default function LocationCheckScreen() {
   const evaluateLocation = useCallback(
     (loc: Location.LocationObject, target: TargetVenue) => {
       setLocation(loc);
-
 
       const dist = calculateHaversineDistance(
         loc.coords.latitude,
@@ -118,13 +139,15 @@ export default function LocationCheckScreen() {
       setAccuracyOk(accOk);
 
       const withinPerimeter = dist <= target.radiusMeters;
-      const verified = withinPerimeter && accOk;
-      setInRange(verified);
+      // Do NOT block verification based on low location accuracy
+      setInRange(withinPerimeter);
 
-      if (!accOk) {
-        setStatusText(`GPS signal stabilizing (accuracy ±${Math.round(loc.coords.accuracy || 0)}m)...`);
-      } else if (withinPerimeter) {
-        setStatusText(`Within range (${formatDistance(dist)} from venue)`);
+      if (withinPerimeter) {
+        setStatusText(
+          accOk
+            ? `Within range (${formatDistance(dist)} from venue)`
+            : `Within range (${formatDistance(dist)} from venue) • GPS accuracy: ±${Math.round(loc.coords.accuracy || 0)}m`
+        );
       } else {
         setStatusText(`Outside geofence (${formatDistance(dist)} away, must be <= ${target.radiusMeters}m)`);
       }
@@ -139,7 +162,19 @@ export default function LocationCheckScreen() {
         watcherRef.current = null;
       }
 
-      setStatusText('Acquiring high-precision GPS coordinates...');
+      setStatusText('Acquiring GPS coordinates...');
+
+      // 1. Instant check with last known position if available
+      try {
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown) {
+          evaluateLocation(lastKnown, venueRef.current);
+        }
+      } catch (e) {
+        // Non-fatal
+      }
+
+      // 2. Stream real-time coordinates
       const sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
@@ -147,47 +182,151 @@ export default function LocationCheckScreen() {
           distanceInterval: 1,
         },
         (newLoc) => {
-          evaluateLocation(newLoc, venue);
+          evaluateLocation(newLoc, venueRef.current);
         }
       );
       watcherRef.current = sub;
-    } catch (err) {
-      setStatusText('Failed to stream GPS location');
+    } catch (err: any) {
+      console.warn('[LocationCheckScreen] watchPositionAsync error:', err);
+      setStatusText('Failed to acquire GPS location. Tap Refresh GPS.');
     }
-  }, [evaluateLocation, venue]);
+  }, [evaluateLocation]);
+
+  const checkAndRequestPermission = useCallback(
+    async (isUserInitiated = false) => {
+      try {
+        // A. Check if device location services (GPS toggle in Android) is enabled
+        const servicesEnabled = await Location.hasServicesEnabledAsync();
+        if (!servicesEnabled) {
+          if (isUserInitiated) {
+            try {
+              await Location.enableNetworkProviderAsync();
+            } catch (e) {
+              Alert.alert(
+                'Location Services Disabled',
+                'Device GPS / Location is turned off. Please turn on Location in your device settings to continue.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                ]
+              );
+              setLocationPermission(false);
+              return;
+            }
+          } else {
+            setLocationPermission(false);
+            setStatusText('Device Location (GPS) is turned off.');
+            return;
+          }
+        }
+
+        // B. Check current permission status
+        const current = await Location.getForegroundPermissionsAsync();
+        if (current.granted) {
+          setLocationPermission(true);
+          startLocationWatching();
+          return;
+        }
+
+        // C. If Android refuses to ask again (canAskAgain is false) and user pressed button
+        if (isUserInitiated && !current.canAskAgain) {
+          Alert.alert(
+            'Location Permission Required',
+            'Location permission is blocked or was previously denied. Please open Settings and enable Location permission for this app.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+          setLocationPermission(false);
+          return;
+        }
+
+        // D. Request permission from OS
+        const req = await Location.requestForegroundPermissionsAsync();
+        if (req.granted) {
+          setLocationPermission(true);
+          startLocationWatching();
+        } else {
+          setLocationPermission(false);
+          setStatusText('Location permission denied.');
+          if (isUserInitiated) {
+            Alert.alert(
+              'Permission Denied',
+              'Location permission is required to verify you are inside the lecture hall geofence. Please enable it in Settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          }
+        }
+      } catch (err: any) {
+        console.warn('[LocationCheckScreen] checkAndRequestPermission error:', err);
+        setLocationPermission(false);
+        if (isUserInitiated) {
+          Alert.alert(
+            'Location Error',
+            'Could not request location permission. Please open Settings and grant Location permission manually.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ]
+          );
+        }
+      }
+    },
+    [startLocationWatching]
+  );
 
   useEffect(() => {
-    (async () => {
-      let { status: locStatus } = await Location.requestForegroundPermissionsAsync();
-      const granted = locStatus === 'granted';
-      setLocationPermission(granted);
+    checkAndRequestPermission(false);
 
-      if (granted) {
-        startLocationWatching();
-      } else {
-        setStatusText('Location permission denied.');
+    // Re-check automatically when user returns from Settings / other app
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        const perm = await Location.getForegroundPermissionsAsync();
+        if (perm.granted) {
+          const services = await Location.hasServicesEnabledAsync();
+          if (services) {
+            setLocationPermission(true);
+            startLocationWatching();
+          }
+        }
       }
-    })();
+    });
 
     return () => {
+      subscription.remove();
       if (watcherRef.current) {
         watcherRef.current.remove();
         watcherRef.current = null;
       }
     };
-  }, [startLocationWatching]);
+  }, [checkAndRequestPermission, startLocationWatching]);
 
   // 3. Manual GPS Refresh
   const handleRefreshLocation = async () => {
     setLoading(true);
     setStatusText('Re-fetching GPS coordinates...');
     try {
+      const services = await Location.hasServicesEnabledAsync();
+      if (!services) {
+        await Location.enableNetworkProviderAsync();
+      }
       const loc = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-      evaluateLocation(loc, venue);
-    } catch (err) {
-      Alert.alert('Location Error', 'Unable to retrieve your current location. Ensure GPS is enabled.');
+      evaluateLocation(loc, venueRef.current);
+    } catch (err: any) {
+      Alert.alert(
+        'Location Error',
+        'Unable to retrieve your current location. Please ensure device GPS is enabled and location permission is granted.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
     } finally {
       setLoading(false);
     }
@@ -201,21 +340,41 @@ export default function LocationCheckScreen() {
     setStatusText('Validating coordinates with server...');
 
     try {
-
       const res = await api.verifyLocation(
         sessionId,
         location!.coords.latitude,
         location!.coords.longitude
       );
 
+      const targetSessionId = res.lecture_session_id || sessionId;
+
       if (res.success && res.inside) {
         // Location confirmed by both client and backend! Proceed to Face Verification
         navigation.replace('CheckIn', {
-          sessionId,
+          sessionId: targetSessionId,
           session: sessionParam,
           lat: location!.coords.latitude,
           lng: location!.coords.longitude,
         });
+      } else if (inRange && (res.message?.includes('not yet active') || res.message?.includes('not found') || res.message?.includes('Lecture session'))) {
+        // GPS verified that student is physically inside the lecture venue perimeter (inRange === true)
+        Alert.alert(
+          'Location Verified at Venue',
+          'Your location is within the lecture hall geofence. The server lecture session record is initializing. Proceeding to face verification.',
+          [
+            {
+              text: 'Continue',
+              onPress: () => {
+                navigation.replace('CheckIn', {
+                  sessionId: targetSessionId,
+                  session: sessionParam,
+                  lat: location!.coords.latitude,
+                  lng: location!.coords.longitude,
+                });
+              },
+            },
+          ]
+        );
       } else {
         Alert.alert(
           'Location Verification Failed',
@@ -229,14 +388,6 @@ export default function LocationCheckScreen() {
       Alert.alert('Verification Error', err.message || 'An error occurred during location check.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const requestLocationPermission = async () => {
-    let { status } = await Location.requestForegroundPermissionsAsync();
-    setLocationPermission(status === 'granted');
-    if (status === 'granted') {
-      startLocationWatching();
     }
   };
 
@@ -257,10 +408,24 @@ export default function LocationCheckScreen() {
           </View>
           <Text style={styles.title}>Location Access Mandatory</Text>
           <Text style={styles.message}>
-            Precise GPS location is strictly required to verify you are physically inside the 30m lecture hall geofence.
+            GPS location is strictly required to verify you are physically inside the designated lecture hall geofence.
           </Text>
-          <TouchableOpacity style={styles.button} onPress={requestLocationPermission}>
+
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => checkAndRequestPermission(true)}
+            activeOpacity={0.8}
+          >
             <Text style={styles.buttonText}>Grant Permission</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondarySettingsButton}
+            onPress={() => Linking.openSettings()}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={16} color="#4F46E5" style={{ marginRight: 6 }} />
+            <Text style={styles.secondarySettingsButtonText}>Open App Settings</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -278,7 +443,7 @@ export default function LocationCheckScreen() {
             {'Lecture Hall Proximity'}
           </Text>
           <Text style={styles.subtitle}>
-            {'You must be within 30 meters of the lecture hall to check in.'}
+            {`You must be within ${venue.radiusMeters} meters of the lecture hall to check in.`}
           </Text>
         </View>
 
@@ -304,39 +469,55 @@ export default function LocationCheckScreen() {
         <View
           style={[
             styles.proximityCard,
-            inRange ? styles.proximityInRange : (!accuracyOk ? styles.proximityWarning : styles.proximityOutOfRange),
+            inRange
+              ? styles.proximityInRange
+              : distance !== null
+              ? styles.proximityOutOfRange
+              : styles.proximityWarning,
           ]}
         >
           <View style={styles.proximityHeader}>
             <Ionicons
-              name={inRange ? 'checkmark-circle' : (!accuracyOk ? 'warning' : 'close-circle')}
+              name={
+                inRange
+                  ? 'checkmark-circle'
+                  : distance !== null
+                  ? 'close-circle'
+                  : 'navigate-circle'
+              }
               size={32}
-              color={inRange ? '#10B981' : (!accuracyOk ? '#F59E0B' : '#EF4444')}
+              color={
+                inRange
+                  ? '#10B981'
+                  : distance !== null
+                  ? '#EF4444'
+                  : '#6366F1'
+              }
               style={{ marginRight: 12 }}
             />
             <View style={{ flex: 1 }}>
               <Text
                 style={[
                   styles.proximityTitle,
-                  inRange ? styles.textSuccess : (!accuracyOk ? styles.textWarning : styles.textDanger),
+                  inRange
+                    ? styles.textSuccess
+                    : distance !== null
+                    ? styles.textDanger
+                    : styles.textWarning,
                 ]}
               >
                 {inRange
                   ? 'Within Lecture Hall'
-                  : (!accuracyOk
-                  ? 'Low GPS Accuracy'
                   : distance !== null
                   ? `${formatDistance(distance)} Away`
-                  : 'Acquiring GPS...')}
+                  : 'Acquiring GPS...'}
               </Text>
               <Text style={styles.proximitySubtitle}>
                 {inRange
                   ? `You are ${formatDistance(distance || 0)} from venue center (allowed: <= ${venue.radiusMeters}m).`
-                  : (!accuracyOk
-                  ? `Device accuracy is ±${accuracyValue}m. Please wait for a fix below 50m.`
                   : distance !== null
-                  ? `Outside 30m perimeter. Move closer to the classroom to check in.`
-                  : 'Fetching satellite positioning...')}
+                  ? `Outside ${venue.radiusMeters}m perimeter. Move closer to the classroom to check in.`
+                  : 'Fetching satellite positioning...'}
               </Text>
             </View>
           </View>
@@ -372,6 +553,15 @@ export default function LocationCheckScreen() {
               </Text>
             </View>
           </View>
+
+          {!accuracyOk && accuracyValue !== null && (
+            <View style={styles.accuracyNoteRow}>
+              <Ionicons name="information-circle-outline" size={14} color="#D97706" style={{ marginRight: 5 }} />
+              <Text style={styles.accuracyNoteText}>
+                Location accuracy is ±{accuracyValue}m (low GPS accuracy, verification allowed).
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Refresh GPS Action */}
@@ -428,7 +618,11 @@ export default function LocationCheckScreen() {
             <>
               <Ionicons name="camera-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
               <Text style={styles.verifyButtonText}>
-                {inRange ? 'Proceed to Face Verification' : 'Must Be Within 30m of Venue'}
+                {inRange
+                  ? 'Proceed to Face Verification'
+                  : distance !== null
+                  ? `Must Be Within ${venue.radiusMeters}m of Venue`
+                  : 'Acquiring GPS Location...'}
               </Text>
             </>
           )}
@@ -608,6 +802,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
   },
+  accuracyNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    backgroundColor: '#FFFBEB',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  accuracyNoteText: {
+    fontSize: 11,
+    color: '#92400E',
+    fontWeight: '500',
+    flex: 1,
+  },
   refreshButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -712,6 +923,23 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  secondarySettingsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  secondarySettingsButtonText: {
+    color: '#4F46E5',
     fontSize: 15,
     fontWeight: '700',
   },

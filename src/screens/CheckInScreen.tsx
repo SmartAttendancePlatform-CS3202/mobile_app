@@ -112,7 +112,7 @@ export default function CheckInScreen() {
       }
 
       // 3. Verify real embedding with backend microservice / database
-      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding);
+      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding, captured.depthFeatures);
 
       if (!faceCheckRes.success || !faceCheckRes.is_match) {
         if (faceCheckRes.requires_re_registration) {
