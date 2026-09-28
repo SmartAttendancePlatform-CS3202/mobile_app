@@ -45,8 +45,8 @@ export function formatDistance(meters: number): string {
 }
 
 /**
- * Validates whether device GPS accuracy is acceptable for attendance check-in.
- * Acceptable range is <= 50 meters.
+ * Evaluates whether device GPS accuracy is within optimal threshold (<= 50 meters).
+ * Used for informational UI badges; does not block check-in.
  */
 export function isAccuracyAcceptable(accuracy: number | null | undefined): boolean {
   if (accuracy === null || accuracy === undefined || isNaN(accuracy)) {

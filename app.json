@@ -7,10 +7,20 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app requires access to your camera for face verification.",
+        "NSLocationWhenInUseUsageDescription": "This app requires access to your location to verify attendance at the lecture venue."
+      },
+      "bundleIdentifier": "com.anonymous.mobileapp"
     },
     "android": {
       "package": "com.anonymous.mobileapp",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -23,12 +33,6 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      [
-        "react-native-vision-camera",
-        {
-          "cameraPermissionText": "This app requires access to your camera for face verification."
-        }
-      ],
       [
         "expo-build-properties",
         {

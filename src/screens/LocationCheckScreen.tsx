@@ -118,12 +118,10 @@ export default function LocationCheckScreen() {
       setAccuracyOk(accOk);
 
       const withinPerimeter = dist <= target.radiusMeters;
-      const verified = withinPerimeter && accOk;
-      setInRange(verified);
+      // Do not block attendance on low GPS accuracy; allow check-in if within perimeter
+      setInRange(withinPerimeter);
 
-      if (!accOk) {
-        setStatusText(`GPS signal stabilizing (accuracy ±${Math.round(loc.coords.accuracy || 0)}m)...`);
-      } else if (withinPerimeter) {
+      if (withinPerimeter) {
         setStatusText(`Within range (${formatDistance(dist)} from venue)`);
       } else {
         setStatusText(`Outside geofence (${formatDistance(dist)} away, must be <= ${target.radiusMeters}m)`);
@@ -304,39 +302,35 @@ export default function LocationCheckScreen() {
         <View
           style={[
             styles.proximityCard,
-            inRange ? styles.proximityInRange : (!accuracyOk ? styles.proximityWarning : styles.proximityOutOfRange),
+            inRange ? styles.proximityInRange : styles.proximityOutOfRange,
           ]}
         >
           <View style={styles.proximityHeader}>
             <Ionicons
-              name={inRange ? 'checkmark-circle' : (!accuracyOk ? 'warning' : 'close-circle')}
+              name={inRange ? 'checkmark-circle' : 'close-circle'}
               size={32}
-              color={inRange ? '#10B981' : (!accuracyOk ? '#F59E0B' : '#EF4444')}
+              color={inRange ? '#10B981' : '#EF4444'}
               style={{ marginRight: 12 }}
             />
             <View style={{ flex: 1 }}>
               <Text
                 style={[
                   styles.proximityTitle,
-                  inRange ? styles.textSuccess : (!accuracyOk ? styles.textWarning : styles.textDanger),
+                  inRange ? styles.textSuccess : styles.textDanger,
                 ]}
               >
                 {inRange
                   ? 'Within Lecture Hall'
-                  : (!accuracyOk
-                  ? 'Low GPS Accuracy'
                   : distance !== null
                   ? `${formatDistance(distance)} Away`
-                  : 'Acquiring GPS...')}
+                  : 'Acquiring GPS...'}
               </Text>
               <Text style={styles.proximitySubtitle}>
                 {inRange
                   ? `You are ${formatDistance(distance || 0)} from venue center (allowed: <= ${venue.radiusMeters}m).`
-                  : (!accuracyOk
-                  ? `Device accuracy is ±${accuracyValue}m. Please wait for a fix below 50m.`
                   : distance !== null
-                  ? `Outside 30m perimeter. Move closer to the classroom to check in.`
-                  : 'Fetching satellite positioning...')}
+                  ? `Outside ${venue.radiusMeters}m perimeter. Move closer to the classroom to check in.`
+                  : 'Fetching satellite positioning...'}
               </Text>
             </View>
           </View>
