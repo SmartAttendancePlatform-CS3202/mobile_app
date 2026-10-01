@@ -28,7 +28,7 @@ export const POSE_SEQUENCE: PoseTarget[] = [
   },
   {
     pose: 'LEFT',
-    targetYaw: -25,
+    targetYaw: 25,
     targetPitch: 0,
     toleranceYaw: 12,
     tolerancePitch: 12,
@@ -37,7 +37,7 @@ export const POSE_SEQUENCE: PoseTarget[] = [
   },
   {
     pose: 'RIGHT',
-    targetYaw: 25,
+    targetYaw: -25,
     targetPitch: 0,
     toleranceYaw: 12,
     tolerancePitch: 12,

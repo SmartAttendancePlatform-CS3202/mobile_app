@@ -20,7 +20,7 @@ export interface CaptureCapableRef {
 
 /**
  * Captures a real photo via VisionCamera, crops to face bounds with square geometry and front-camera mirroring,
- * applies canonical RGB float normalization, and extracts real 192D MobileFaceNet embedding and 48D depth vector.
+ * applies canonical RGB float normalization, and extracts real 512D MobileFaceNet embedding and 48D depth vector.
  */
 export async function captureAndProcessFace(
   cameraRef: RefObject<CaptureCapableRef | null>,
@@ -168,7 +168,7 @@ export async function captureAndProcessFace(
     normalizedRgb[i] = (rgb[i] - 127.5) / 128.0;
   }
 
-  // 6. Extract real 192D MobileFaceNet embedding
+  // 6. Extract real 512D MobileFaceNet embedding
   const embedding = await generateFaceEmbedding(normalizedRgb);
 
   // 7. Extract real 48D depth & topology features (using luminance derived from natural RGB)

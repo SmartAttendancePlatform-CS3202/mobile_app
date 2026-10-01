@@ -55,9 +55,9 @@ export async function loadMobileFaceNetModel(): Promise<TfliteModel> {
 }
 
 /**
- * Output embedding dimensionality (192D)
+ * Output embedding dimensionality (512D)
  */
-export const EMBEDDING_DIM = 192;
+export const EMBEDDING_DIM = 512;
 
 
 
@@ -159,7 +159,7 @@ export function l2Normalize(vector: Float32Array): Float32Array {
 }
 
 /**
- * Runs MobileFaceNet inference asynchronously off the UI thread and returns 192D L2-normalized Float32Array.
+ * Runs MobileFaceNet inference asynchronously off the UI thread and returns 512D L2-normalized Float32Array.
  */
 export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Float32Array> {
   const model = await loadMobileFaceNetModel();
@@ -176,7 +176,7 @@ export async function generateFaceEmbedding(imageInput: ImageInput): Promise<Flo
 
   const rawEmbedding = new Float32Array(outputBuffers[0]);
 
-  // Ensure output vector length matches EMBEDDING_DIM (192)
+  // Ensure output vector length matches EMBEDDING_DIM (512)
   let vector: Float32Array;
   if (rawEmbedding.length === EMBEDDING_DIM) {
     vector = rawEmbedding;

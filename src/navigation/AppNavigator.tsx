@@ -25,7 +25,7 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         freezeOnBlur: true,
-        headerShown: route.name !== 'Account',
+        headerShown: false,
         headerStyle: { backgroundColor: '#F3F4F6', elevation: 0, shadowOpacity: 0, borderBottomWidth: 0 },
         headerTitleStyle: { color: '#111827', fontWeight: 'bold', fontSize: 22 },
         tabBarIcon: ({ focused, color, size }) => {
@@ -41,7 +41,7 @@ function MainTabs() {
           }
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#4F46E5',
+        tabBarActiveTintColor: '#3366cc',
         tabBarInactiveTintColor: '#9CA3AF',
         tabBarStyle: {
           backgroundColor: '#FFFFFF',

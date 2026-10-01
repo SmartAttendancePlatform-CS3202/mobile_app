@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, InteractionManager, Alert, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, InteractionManager, Alert, RefreshControl } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { mockStudent, mockAcademicInfo } from '../services/mockData';
@@ -88,179 +88,184 @@ export default function HomeScreen() {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={onRefresh}
-          colors={['#4F46E5']}
-          tintColor="#4F46E5"
+          colors={['#3366cc']}
+          tintColor="#3366cc"
         />
       }
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.welcomeText}>Welcome back,</Text>
-          <Text style={styles.nameText}>{currentStudent.name}</Text>
-          <Text style={styles.deptText}>{currentStudent.department} • {currentStudent.batch}</Text>
+      <View style={styles.contentContainer}>
+        {/* Header Title */}
+        <View style={styles.pageHeader}>
+          <Text style={styles.pageTitle}>Dashboard</Text>
         </View>
-        <TouchableOpacity 
-          style={styles.avatar}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('Account')}
-        >
-          <Text style={styles.avatarText}>{currentStudent.name ? currentStudent.name.charAt(0) : 'S'}</Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Warning Banner: Face Biometrics Not Registered */}
-      {!isFaceRegistered && (
-        <View style={styles.warningBanner}>
-          <View style={styles.warningContent}>
-            <View style={styles.warningIconCircle}>
-              <Ionicons name="alert-circle" size={24} color="#D97706" />
-            </View>
-            <View style={styles.warningTextGroup}>
-              <Text style={styles.warningTitle}>Face Biometrics Required</Text>
-              <Text style={styles.warningSubtitle}>
-                You haven't registered your face yet. Biometrics are required to check in to lectures.
-              </Text>
-            </View>
+        {/* User Profile Summary */}
+        <View style={styles.greetingSection}>
+          <View style={styles.greetingTextContainer}>
+            <Text style={styles.welcomeText}>WELCOME BACK,</Text>
+            <Text style={styles.nameText}>{currentStudent.name}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.warningButton}
-            activeOpacity={0.85}
-            onPress={() => navigation.navigate('FaceRegistration')}
+          {/* Avatar (Optional as per original code) */}
+          <TouchableOpacity 
+            style={styles.avatar}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Account')}
           >
-            <Ionicons name="camera-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
-            <Text style={styles.warningButtonText}>Register Face Now</Text>
+            <Text style={styles.avatarText}>{currentStudent.name ? currentStudent.name.charAt(0) : 'S'}</Text>
           </TouchableOpacity>
         </View>
-      )}
 
-      {/* Quick Timetable Banner */}
-      <TouchableOpacity 
-        style={styles.timetableBanner}
-        activeOpacity={0.8}
-        onPress={() => navigation.navigate('Timetable')}
-      >
-        <View style={styles.bannerLeft}>
-          <View style={styles.bannerIconCircle}>
-            <Ionicons name="calendar" size={20} color="#4F46E5" />
-          </View>
-          <View style={{ marginLeft: 12 }}>
-            <Text style={styles.bannerTitle}>Academic Timetable</Text>
-            <Text style={styles.bannerSubtitle}>{mockAcademicInfo.term} • {mockAcademicInfo.session}</Text>
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color="#6B7280" />
-      </TouchableOpacity>
-
-      <Text style={styles.sectionTitle}>Today's & Upcoming Classes</Text>
-
-      {loading ? (
-        <View style={{ gap: 16, marginTop: 10 }}>
-          <Skeleton height={180} borderRadius={16} />
-          <Skeleton height={180} borderRadius={16} />
-        </View>
-      ) : sessions.length === 0 ? (
-        <Text style={{ textAlign: 'center', marginTop: 20, color: '#6B7280' }}>No classes scheduled for today.</Text>
-      ) : (
-        sessions.map((session) => (
-          <View key={session.id} style={[styles.card, session.isActive && styles.activeCard]}>
-            <View style={styles.cardHeader}>
-              <View style={styles.badgeRow}>
-                {session.courseCode && (
-                  <View style={styles.codeBadge}>
-                    <Text style={styles.codeBadgeText}>{session.courseCode}</Text>
-                  </View>
-                )}
-                {session.typeLabel && (
-                  <View style={[styles.typeBadge, session.type === 'P' ? styles.pBadge : styles.lBadge]}>
-                    <Text style={[styles.typeBadgeText, session.type === 'P' ? styles.pBadgeText : styles.lBadgeText]}>
-                      {session.typeLabel}
-                    </Text>
-                  </View>
-                )}
+        {/* Warning Banner: Face Biometrics Not Registered */}
+        {!isFaceRegistered && (
+          <View style={styles.warningBanner}>
+            <View style={styles.warningContent}>
+              <View style={styles.warningIconCircle}>
+                <Ionicons name="alert-circle" size={20} color="#92400E" />
               </View>
-
-              {session.isActive ? (
-                <View style={styles.activeBadge}>
-                  <View style={styles.activeDot} />
-                  <Text style={styles.activeText}>Live</Text>
-                </View>
-              ) : (
-                <Text style={styles.dayTag}>{session.day}</Text>
-              )}
+              <View style={styles.warningTextGroup}>
+                <Text style={styles.warningTitle}>Face Biometrics Required</Text>
+                <Text style={styles.warningSubtitle}>
+                  You haven't registered your face yet. Biometrics are required to check in to lectures.
+                </Text>
+              </View>
             </View>
-
-            <Text style={styles.cardTitle}>{session.courseName}</Text>
-            
-            <View style={styles.infoRow}>
-              <Ionicons name="location-outline" size={16} color="#4F46E5" />
-              <Text style={styles.venueText}>{session.venue}</Text>
-            </View>
-
-            <View style={styles.infoRow}>
-              <Ionicons name="person-outline" size={16} color="#6B7280" />
-              <Text style={styles.sessionText}>{session.lecturer}</Text>
-            </View>
-            
-            <View style={styles.infoRow}>
-              <Ionicons name="time-outline" size={16} color="#6B7280" />
-              <Text style={styles.sessionText}>
-                {session.startTime} - {session.endTime}
-                {session.duration ? `  (${session.duration})` : ''}
-              </Text>
-            </View>
-            
-            <TouchableOpacity 
-              style={[
-                styles.checkInButton, 
-                session.isActive 
-                  ? styles.buttonActive 
-                  : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)
-              ]}
-              onPress={() => {
-                if (!isFaceRegistered) {
-                  Alert.alert(
-                    'Biometrics Required',
-                    'You must register your face biometrics before you can check in to class.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Register Now', onPress: () => navigation.navigate('FaceRegistration') },
-                    ]
-                  );
-                  return;
-                }
-                if (session.isCheckInAllowed) {
-                  navigation.navigate('LocationCheck', { sessionId: session.id, session });
-                }
-              }}
-              disabled={!session.isCheckInAllowed}
+            <TouchableOpacity
+              style={styles.warningButton}
+              activeOpacity={0.85}
+              onPress={() => navigation.navigate('FaceRegistration')}
             >
-              <Ionicons 
-                name={session.isActive ? "finger-print-outline" : (session.isCheckInAllowed ? "time-outline" : "lock-closed-outline")} 
-                size={18} 
-                color={session.isActive ? "#fff" : (session.isCheckInAllowed ? "#4F46E5" : "#9CA3AF")} 
-                style={{ marginRight: 6 }}
-              />
-              <Text style={[
-                styles.checkInButtonText, 
-                session.isActive 
-                  ? styles.buttonTextActive 
-                  : (session.isCheckInAllowed ? styles.buttonTextAllowed : styles.buttonTextDisabled)
-              ]}>
-                {session.isActive 
-                  ? "Check-In to Live Class" 
-                  : (session.isCheckInAllowed 
-                      ? "Check-In Open Early" 
-                      : (session.isEnded ? "Class Ended" : "Check-In Opens 15m Prior"))}
-              </Text>
-              {session.isCheckInAllowed && (
-                <Ionicons name="arrow-forward" size={18} color={session.isActive ? "#fff" : "#4F46E5"} />
-              )}
+              <Ionicons name="camera-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.warningButtonText}>Register Face Now</Text>
             </TouchableOpacity>
           </View>
-        ))
-      )}
-      <View style={{ height: 40 }} />
+        )}
+
+
+
+        {/* Classes Section */}
+        <View style={styles.classesSectionHeader}>
+          <Text style={styles.sectionTitle}>Today's & Upcoming Classes</Text>
+          <View style={styles.classCountBadge}>
+            <Text style={styles.classCountText}>{sessions.length} Classes</Text>
+          </View>
+        </View>
+
+        {loading ? (
+          <View style={{ gap: 16, marginTop: 10 }}>
+            <Skeleton height={200} borderRadius={16} />
+            <Skeleton height={200} borderRadius={16} />
+          </View>
+        ) : sessions.length === 0 ? (
+          <Text style={styles.emptyText}>No classes scheduled for today.</Text>
+        ) : (
+          sessions.map((session) => (
+            <View key={session.id} style={styles.cardWrapper}>
+              <View style={[styles.card, session.isActive ? styles.activeCard : styles.inactiveCard]}>
+                
+                {/* Left colored accent bar */}
+                <View style={[styles.leftAccentBar, { backgroundColor: session.isActive ? '#3366cc' : '#737784' }]} />
+
+                {/* Card Header / Meta Badges */}
+                <View style={styles.cardHeader}>
+                  <View style={styles.badgeRow}>
+                    {session.courseCode && (
+                      <View style={styles.codeBadge}>
+                        <Text style={styles.codeBadgeText}>{session.courseCode}</Text>
+                      </View>
+                    )}
+                    {session.typeLabel && (
+                      <View style={styles.typeBadge}>
+                        <Text style={styles.typeBadgeText}>{session.typeLabel}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {session.isActive ? (
+                    <View style={styles.activeBadge}>
+                      <View style={styles.activeDot} />
+                      <Text style={styles.activeText}>Live</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.dayTag}>{session.day}</Text>
+                  )}
+                </View>
+
+                {/* Course Subject Title */}
+                <Text style={styles.cardTitle}>{session.courseName}</Text>
+                
+                {/* Details List */}
+                <View style={styles.detailsList}>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="location-sharp" size={16} color="#3366cc" style={styles.infoIcon} />
+                    <Text style={styles.venueText}>{session.venue}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="person" size={16} color="#737784" style={styles.infoIcon} />
+                    <Text style={styles.sessionText}>{session.lecturer}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="time" size={16} color="#737784" style={styles.infoIcon} />
+                    <Text style={styles.sessionText}>
+                      {session.startTime} - {session.endTime}
+                      {session.duration ? `  (${session.duration})` : ''}
+                    </Text>
+                  </View>
+                </View>
+                
+                {/* Check-In Button */}
+                <TouchableOpacity 
+                  style={[
+                    styles.checkInButton, 
+                    session.isActive 
+                      ? styles.buttonActive 
+                      : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)
+                  ]}
+                  onPress={() => {
+                    if (!isFaceRegistered) {
+                      Alert.alert(
+                        'Biometrics Required',
+                        'You must register your face biometrics before you can check in to class.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Register Now', onPress: () => navigation.navigate('FaceRegistration') },
+                        ]
+                      );
+                      return;
+                    }
+                    if (session.isCheckInAllowed) {
+                      navigation.navigate('LocationCheck', { sessionId: session.id, session });
+                    }
+                  }}
+                  disabled={!session.isCheckInAllowed}
+                >
+                  <Ionicons 
+                    name={session.isActive ? "finger-print-outline" : (session.isCheckInAllowed ? "time-outline" : "lock-closed-outline")} 
+                    size={16} 
+                    color={session.isActive ? "#fff" : (session.isCheckInAllowed ? "#094cb2" : "#737784")} 
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={[
+                    styles.checkInButtonText, 
+                    session.isActive 
+                      ? styles.buttonTextActive 
+                      : (session.isCheckInAllowed ? styles.buttonTextAllowed : styles.buttonTextDisabled)
+                  ]}>
+                    {session.isActive 
+                      ? "Check-In to Live Class" 
+                      : (session.isCheckInAllowed 
+                          ? "Check-In Open Early" 
+                          : (session.isEnded ? "Class Ended" : "View Lecture Details"))}
+                  </Text>
+                  {session.isCheckInAllowed && (
+                    <Ionicons name="arrow-forward" size={16} color={session.isActive ? "#fff" : "#094cb2"} style={{ marginLeft: 6 }} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+      </View>
+      <View style={{ height: 100 }} />
     </ScrollView>
   );
 }
@@ -268,236 +273,64 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#faf9fa',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  contentContainer: {
+    paddingHorizontal: 24,
+    paddingTop: 12,
+  },
+  pageHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9e8e9',
+    paddingBottom: 12,
     marginBottom: 20,
-    marginTop: 10,
+  },
+  pageTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    letterSpacing: -0.5,
+  },
+  greetingSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  greetingTextContainer: {
+    paddingRight: 8,
   },
   welcomeText: {
-    fontSize: 15,
-    color: '#6B7280',
-    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#737784',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   nameText: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  deptText: {
-    fontSize: 12,
-    color: '#4F46E5',
-    fontWeight: '600',
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginTop: 2,
+    textTransform: 'capitalize',
+    letterSpacing: -0.5,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#4F46E5',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#3366cc',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.3,
+    shadowColor: '#3366cc',
+    shadowOpacity: 0.2,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
   avatarText: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
-  },
-  timetableBanner: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  bannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bannerIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#EEF2FF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bannerTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  bannerSubtitle: {
-    fontSize: 11,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 14,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    padding: 18,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 15,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
-  },
-  activeCard: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#FAFAFF',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  codeBadge: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  codeBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  typeBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  typeBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  lBadge: {
-    backgroundColor: '#EEF2FF',
-  },
-  lBadgeText: {
-    color: '#4F46E5',
-  },
-  pBadge: {
-    backgroundColor: '#ECFDF5',
-  },
-  pBadgeText: {
-    color: '#059669',
-  },
-  dayTag: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 10,
-    lineHeight: 22,
-  },
-  activeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ECFDF5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  activeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10B981',
-    marginRight: 4,
-  },
-  activeText: {
-    color: '#10B981',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  venueText: {
-    fontSize: 14,
-    color: '#4F46E5',
-    marginLeft: 8,
-    fontWeight: '700',
-  },
-  sessionText: {
-    fontSize: 14,
-    color: '#4B5563',
-    marginLeft: 8,
-    fontWeight: '500',
-  },
-  checkInButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 13,
-    borderRadius: 12,
-    marginTop: 14,
-  },
-  buttonActive: {
-    backgroundColor: '#4F46E5',
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  buttonAllowed: {
-    backgroundColor: '#EEF2FF',
-  },
-  buttonDisabled: {
-    backgroundColor: '#F3F4F6',
-  },
-  checkInButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginRight: 6,
-  },
-  buttonTextActive: {
-    color: '#FFFFFF',
-  },
-  buttonTextAllowed: {
-    color: '#4F46E5',
-  },
-  buttonTextDisabled: {
-    color: '#9CA3AF',
   },
   warningBanner: {
     backgroundColor: '#FFFBEB',
@@ -507,7 +340,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 18,
     shadowColor: '#D97706',
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.05,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
   },
@@ -530,7 +363,7 @@ const styles = StyleSheet.create({
   },
   warningTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: 'bold',
     color: '#92400E',
     marginBottom: 4,
   },
@@ -541,7 +374,7 @@ const styles = StyleSheet.create({
   },
   warningButton: {
     backgroundColor: '#D97706',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 16,
     flexDirection: 'row',
@@ -552,6 +385,231 @@ const styles = StyleSheet.create({
   warningButtonText: {
     color: '#FFFFFF',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: 'bold',
+  },
+  timetableBanner: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: '#e3e2e3',
+  },
+  bannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  bannerIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e7ebff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerTitle: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+  },
+  bannerSubtitle: {
+    fontSize: 12,
+    color: '#737784',
+    marginTop: 2,
+  },
+  classesSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 4,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    letterSpacing: -0.3,
+  },
+  classCountBadge: {
+    backgroundColor: '#dfe3e8',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  classCountText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#42474b',
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: 20,
+    color: '#737784',
+    fontSize: 14,
+  },
+  cardWrapper: {
+    marginBottom: 16,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 4 },
+    borderWidth: 1,
+    borderColor: '#e3e2e3',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  activeCard: {
+  },
+  inactiveCard: {
+  },
+  leftAccentBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 6,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  codeBadge: {
+    backgroundColor: '#1b1c1d',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  codeBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  typeBadge: {
+    backgroundColor: '#e7ebff',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  typeBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#094cb2',
+  },
+  dayTag: {
+    fontSize: 12,
+    color: '#737784',
+    fontWeight: '600',
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    marginBottom: 12,
+    letterSpacing: -0.3,
+  },
+  detailsList: {
+    marginBottom: 20,
+    gap: 10,
+  },
+  activeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+    marginRight: 6,
+  },
+  activeText: {
+    color: '#047857',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  infoIcon: {
+    width: 16,
+    textAlign: 'center',
+  },
+  venueText: {
+    fontSize: 12,
+    color: '#094cb2',
+    marginLeft: 10,
+    fontWeight: '600',
+  },
+  sessionText: {
+    fontSize: 12,
+    color: '#434653',
+    marginLeft: 10,
+    fontWeight: '500',
+    textTransform: 'capitalize',
+  },
+  checkInButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  buttonActive: {
+    backgroundColor: '#3366cc',
+    shadowColor: '#3366cc',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  buttonAllowed: {
+    backgroundColor: '#faf9fa',
+    borderColor: '#c3c6d5',
+  },
+  buttonDisabled: {
+    backgroundColor: '#faf9fa',
+    borderColor: '#e3e2e3',
+  },
+  checkInButtonText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  buttonTextActive: {
+    color: '#FFFFFF',
+  },
+  buttonTextAllowed: {
+    color: '#094cb2',
+  },
+  buttonTextDisabled: {
+    color: '#737784',
   },
 });
