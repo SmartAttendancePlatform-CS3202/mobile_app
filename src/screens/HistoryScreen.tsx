@@ -1,37 +1,132 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, InteractionManager } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../services/api';
+import api, { formatModuleTitle } from '../services/api';
+import { AttendanceHistoryItem } from '../services/mockData';
+import { useAuth } from '../context/AuthContext';
 import Skeleton from '../components/Skeleton';
 
 export default function HistoryScreen() {
-  const [history, setHistory] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const [history, setHistory] = useState<AttendanceHistoryItem[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isRevalidating, setIsRevalidating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const sortRecords = (records: AttendanceHistoryItem[]): AttendanceHistoryItem[] => {
+    return [...records].sort((a, b) => {
+      const timeA = new Date(a.heldAt || a.date || 0).getTime();
+      const timeB = new Date(b.heldAt || b.date || 0).getTime();
+      return timeB - timeA;
+    });
+  };
+
+  const revalidateHistory = useCallback(async (silent: boolean = false) => {
+    if (!silent) {
+      setIsRevalidating(true);
+    }
+    try {
+      const response = await api.getHistory(user?.id);
+      if (response.success && response.history) {
+        setHistory(sortRecords(response.history));
+      }
+    } catch (e) {
+      console.warn('Error revalidating attendance history:', e);
+    } finally {
+      setIsRevalidating(false);
+      setInitialLoading(false);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      (async () => {
-        const response = await api.getHistory();
-        if (response.success) {
-          const sortedHistory = [...response.history].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setHistory(sortedHistory);
+    let isMounted = true;
+
+    // 1. Immediately read and display offline cache from phone storage
+    (async () => {
+      try {
+        const cached = await api.getCachedHistory(user?.id);
+        if (isMounted && cached && cached.length > 0) {
+          const validCached = cached.filter((c: any) => {
+            const title = formatModuleTitle(c.courseCode, c.courseName, c.course);
+            return (
+              Boolean(title) &&
+              title !== 'Module' &&
+              title !== 'COURSE Class Session' &&
+              title !== 'Academic Module'
+            );
+          });
+          if (validCached.length > 0) {
+            setHistory(sortRecords(validCached));
+            setInitialLoading(false);
+          }
         }
-        setLoading(false);
-      })();
-    });
+      } catch (err) {
+        console.warn('Failed to load initial cached history:', err);
+      }
+    })();
 
-    return () => task.cancel();
-  }, []);
+    // 2. Perform background revalidation against backend/database
+    revalidateHistory(false);
 
-  if (loading) {
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.id, revalidateHistory]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await revalidateHistory(false);
+    setRefreshing(false);
+  };
+
+  const getStatusBadgeConfig = (status: string) => {
+    switch (status) {
+      case 'Present':
+        return {
+          icon: 'checkmark' as const,
+          color: '#10B981',
+          bg: '#ECFDF5',
+          border: '#A7F3D0',
+          text: '#10B981',
+        };
+      case 'Late':
+        return {
+          icon: 'time' as const,
+          color: '#F59E0B',
+          bg: '#FEF3C7',
+          border: '#FDE68A',
+          text: '#D97706',
+        };
+      case 'Absent':
+      default:
+        return {
+          icon: 'close' as const,
+          color: '#EF4444',
+          bg: '#FEF2F2',
+          border: '#FECACA',
+          text: '#EF4444',
+        };
+    }
+  };
+
+  if (initialLoading && history.length === 0) {
     return (
-      <View style={[styles.container, { paddingTop: 20 }]}>
-        <Text style={styles.title}>Attendance History</Text>
+      <View style={[styles.container, { paddingTop: 44 }]}>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Attendance History</Text>
+        </View>
         <View style={{ gap: 12 }}>
-          <Skeleton height={80} borderRadius={16} />
-          <Skeleton height={80} borderRadius={16} />
-          <Skeleton height={80} borderRadius={16} />
-          <Skeleton height={80} borderRadius={16} />
+          <Skeleton height={96} borderRadius={16} />
+          <Skeleton height={96} borderRadius={16} />
+          <Skeleton height={96} borderRadius={16} />
+          <Skeleton height={96} borderRadius={16} />
         </View>
       </View>
     );
@@ -39,34 +134,77 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Attendance History</Text>
+      {/* Header with Top Loading Circle */}
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Attendance History</Text>
+        {isRevalidating && (
+          <View style={styles.topSyncIndicator}>
+            <ActivityIndicator size="small" color="#3366cc" />
+            <Text style={styles.syncingText}>Updating...</Text>
+          </View>
+        )}
+      </View>
+
       <FlatList
         data={history}
         keyExtractor={item => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#3366cc']}
+            tintColor="#3366cc"
+          />
+        }
         renderItem={({ item }) => {
-          const isPresent = item.status === 'Present';
+          const cfg = getStatusBadgeConfig(item.status);
+          const moduleDisplay = formatModuleTitle(item.courseCode, item.courseName, item.course) || 'Academic Module';
+
           return (
             <View style={styles.card}>
               <View style={styles.cardLeft}>
-                <View style={[styles.iconContainer, isPresent ? styles.iconPresent : styles.iconAbsent]}>
-                  <Ionicons name={isPresent ? "checkmark" : "close"} size={20} color={isPresent ? "#10B981" : "#EF4444"} />
+                {/* Left Status Icon Container */}
+                <View style={[styles.iconContainer, { backgroundColor: cfg.bg }]}>
+                  <Ionicons name={cfg.icon} size={20} color={cfg.color} />
                 </View>
+
+                {/* Card Text Info */}
                 <View style={styles.textContainer}>
-                  <Text style={styles.courseName}>{item.course}</Text>
-                  <Text style={styles.date}>{item.date}</Text>
+                  {/* Module Name & Code */}
+                  <Text style={styles.moduleName} numberOfLines={2}>
+                    {moduleDisplay}
+                  </Text>
+
+                  {/* Date Held */}
+                  <View style={styles.dateRow}>
+                    <Ionicons name="calendar-outline" size={13} color="#6B7280" style={{ marginRight: 4 }} />
+                    <Text style={styles.dateText}>
+                      {item.dateFormatted || item.date || 'Recent'}
+                    </Text>
+                  </View>
                 </View>
               </View>
-              <View style={[styles.badge, isPresent ? styles.badgePresent : styles.badgeAbsent]}>
-                <Text style={[styles.badgeText, isPresent ? styles.textPresent : styles.textAbsent]}>
+
+              {/* Status Badge */}
+              <View style={[styles.badge, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+                <Text style={[styles.badgeText, { color: cfg.text }]}>
                   {item.status}
                 </Text>
               </View>
             </View>
           );
         }}
-        ListEmptyComponent={<Text style={styles.empty}>No attendance history found.</Text>}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="calendar-clear-outline" size={48} color="#9CA3AF" />
+            <Text style={styles.emptyText}>No attendance records found.</Text>
+            <Text style={styles.emptySubtext}>
+              Recorded lectures will appear here once held by lecturers.
+            </Text>
+          </View>
+        }
       />
     </View>
   );
@@ -75,20 +213,37 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    paddingTop: 44,
     backgroundColor: '#F3F4F6',
   },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
+    marginBottom: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: '800',
-    marginBottom: 24,
     color: '#111827',
+  },
+  topSyncIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    gap: 6,
+  },
+  syncingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#3366cc',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -108,12 +263,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    marginRight: 10,
+    marginRight: 12,
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -121,19 +276,17 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
   },
-  iconPresent: {
-    backgroundColor: '#ECFDF5',
-  },
-  iconAbsent: {
-    backgroundColor: '#FEF2F2',
-  },
-  courseName: {
+  moduleName: {
     fontSize: 16,
     fontWeight: '700',
     color: '#111827',
     marginBottom: 4,
   },
-  date: {
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dateText: {
     fontSize: 13,
     color: '#6B7280',
     fontWeight: '500',
@@ -142,31 +295,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
-  },
-  badgePresent: {
-    backgroundColor: '#ECFDF5',
     borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  badgeAbsent: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
   },
   badgeText: {
     fontSize: 12,
     fontWeight: '700',
   },
-  textPresent: {
-    color: '#10B981',
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 60,
+    paddingHorizontal: 20,
   },
-  textAbsent: {
-    color: '#EF4444',
-  },
-  empty: {
-    textAlign: 'center',
-    color: '#6B7280',
-    marginTop: 30,
+  emptyText: {
+    marginTop: 12,
     fontSize: 16,
-  }
+    fontWeight: '600',
+    color: '#374151',
+  },
+  emptySubtext: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
 });
+

@@ -461,11 +461,99 @@ export const mockSessions: ClassSession[] = mockTimetableSchedule.filter(
   session => session.type !== 'Break' && session.type !== 'Event'
 );
 
-export const mockAttendanceHistory = [
-  { id: '1', date: '2026-07-01', course: 'CS3053 Computer Security', status: 'Present' },
-  { id: '2', date: '2026-07-02', course: 'MA3024 Numerical Methods', status: 'Present' },
-  { id: '3', date: '2026-07-03', course: 'CS3713 Image Processing', status: 'Present' },
-  { id: '4', date: '2026-07-04', course: 'CS3203 Software Engineering Project', status: 'Present' },
-  { id: '5', date: '2026-07-05', course: 'MA2024 Calculus', status: 'Absent' },
+export interface AttendanceHistoryItem {
+  id: string;
+  lectureSessionId: string;
+  courseCode: string;
+  courseName: string;
+  lectureName: string;
+  sessionNumber: number;
+  heldAt: string;
+  dateFormatted: string;
+  status: 'Present' | 'Late' | 'Absent';
+  // Backwards-compatibility aliases
+  course?: string;
+  date?: string;
+}
+
+export const mockAttendanceHistory: AttendanceHistoryItem[] = [
+  {
+    id: 'rec-001',
+    lectureSessionId: 'sess-001',
+    courseCode: 'CS3053',
+    courseName: 'Computer Security',
+    lectureName: 'Lecture 4: Public Key Cryptography & RSA',
+    sessionNumber: 4,
+    heldAt: '2026-10-02T08:15:00Z',
+    dateFormatted: '02 Oct 2026',
+    status: 'Present',
+    course: 'CS3053 Computer Security',
+    date: '2026-10-02',
+  },
+  {
+    id: 'rec-002',
+    lectureSessionId: 'sess-002',
+    courseCode: 'MA3024',
+    courseName: 'Numerical Methods',
+    lectureName: 'Lecture 3: Newton-Raphson & Root Finding',
+    sessionNumber: 3,
+    heldAt: '2026-10-01T10:15:00Z',
+    dateFormatted: '01 Oct 2026',
+    status: 'Present',
+    course: 'MA3024 Numerical Methods',
+    date: '2026-10-01',
+  },
+  {
+    id: 'rec-003',
+    lectureSessionId: 'sess-003',
+    courseCode: 'CS3713',
+    courseName: 'Digital Image Processing',
+    lectureName: 'Lecture 3: Spatial Filtering & Convolution',
+    sessionNumber: 3,
+    heldAt: '2026-09-30T13:15:00Z',
+    dateFormatted: '30 Sep 2026',
+    status: 'Present',
+    course: 'CS3713 Digital Image Processing',
+    date: '2026-09-30',
+  },
+  {
+    id: 'rec-004',
+    lectureSessionId: 'sess-004',
+    courseCode: 'CS3203',
+    courseName: 'Software Engineering Project',
+    lectureName: 'Lecture 2: Architecture Patterns & Sprint Planning',
+    sessionNumber: 2,
+    heldAt: '2026-09-29T08:15:00Z',
+    dateFormatted: '29 Sep 2026',
+    status: 'Late',
+    course: 'CS3203 Software Engineering Project',
+    date: '2026-09-29',
+  },
+  {
+    id: 'rec-005',
+    lectureSessionId: 'sess-005',
+    courseCode: 'MN3043',
+    courseName: 'Business Economics & Financial Accounting',
+    lectureName: 'Lecture 2: Microeconomic Theory & Cost Models',
+    sessionNumber: 2,
+    heldAt: '2026-09-28T13:15:00Z',
+    dateFormatted: '28 Sep 2026',
+    status: 'Absent',
+    course: 'MN3043 Business Economics',
+    date: '2026-09-28',
+  },
+  {
+    id: 'rec-006',
+    lectureSessionId: 'sess-006',
+    courseCode: 'CS3053',
+    courseName: 'Computer Security',
+    lectureName: 'Lecture 3: Symmetric Ciphers & Block Encryption Modes',
+    sessionNumber: 3,
+    heldAt: '2026-09-25T08:15:00Z',
+    dateFormatted: '25 Sep 2026',
+    status: 'Present',
+    course: 'CS3053 Computer Security',
+    date: '2026-09-25',
+  },
 ];
 

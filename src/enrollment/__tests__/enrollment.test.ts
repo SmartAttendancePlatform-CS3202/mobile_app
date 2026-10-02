@@ -77,21 +77,22 @@ export function runEnrollmentTests(): { passed: number; failed: number } {
     assert(resCenter.isQualified, 'PoseGuide: Qualifies CENTER after 3 stable frames');
 
     guide.advance();
-    assert(guide.getCurrentTarget()?.pose === 'LEFT', 'PoseGuide: Advances to LEFT pose');
+    assert(guide.getCurrentTarget()?.pose === 'CENTER', 'PoseGuide: Advances to second CENTER pose');
     assert(guide.getCurrentPoseIndex() === 1, 'PoseGuide: Current index is 1');
 
-    // LEFT evaluation: in tolerance (yaw -25, pitch 0)
-    guide.evaluate(-24, 1);
-    guide.evaluate(-25, 0);
-    const resLeft = guide.evaluate(-26, 0);
-    assert(resLeft.isQualified, 'PoseGuide: Qualifies LEFT after 3 stable frames');
+    // Second CENTER evaluation: in tolerance (yaw 0, pitch 0)
+    guide.evaluate(3, 2);
+    guide.evaluate(1, -1);
+    const resCenter2 = guide.evaluate(0, 0);
+    assert(resCenter2.isQualified, 'PoseGuide: Qualifies second CENTER frame after 3 stable frames');
 
-    guide.advance(); // -> RIGHT
-    guide.advance(); // -> UP
-    guide.advance(); // -> DOWN
+    guide.advance(); // -> Frame 3 (CENTER)
+    guide.advance(); // -> Frame 4 (CENTER)
+    guide.advance(); // -> Frame 5 (CENTER)
     guide.advance(); // -> COMPLETE
     assert(guide.isComplete(), 'PoseGuide: Reports complete after 5 poses');
     assert(guide.getCompletedPoses().length === 5, 'PoseGuide: Stored all 5 completed poses');
+    assert(guide.getCompletedPoses().every((p) => p === 'CENTER'), 'PoseGuide: All 5 poses are CENTER');
   }
 
   // 2. MultiFrameSampler Tests
@@ -181,18 +182,50 @@ export function runEnrollmentTests(): { passed: number; failed: number } {
 
   // 5. Centroid Embedding Tests
   {
-    const v1 = l2Normalize(new Float32Array(192).fill(1.0));
-    const v2 = l2Normalize(new Float32Array(192).fill(0.8));
-    const v3 = l2Normalize(new Float32Array(192).fill(1.2));
+    const v1 = l2Normalize(new Float32Array(512).fill(1.0));
+    const v2 = l2Normalize(new Float32Array(512).fill(0.8));
+    const v3 = l2Normalize(new Float32Array(512).fill(1.2));
 
     const centroid = computeCentroidEmbedding([v1, v2, v3]);
-    assert(centroid.length === 192, 'Centroid: Dimension is 192');
+    assert(centroid.length === 512, 'Centroid: Dimension is 512');
 
     let sumSq = 0;
     for (let i = 0; i < centroid.length; i++) {
       sumSq += centroid[i] * centroid[i];
     }
     assert(Math.abs(Math.sqrt(sumSq) - 1.0) < 1e-4, 'Centroid: Centroid vector is unit normalized');
+  }
+
+  // 6. Intra-Burst Outlier Filtering Tests
+  {
+    function dotProduct(a: Float32Array, b: Float32Array): number {
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+      return sum;
+    }
+
+    // 4 coherent vectors + 1 orthogonal outlier
+    const v1 = l2Normalize(new Float32Array(512).fill(1.0));
+    const v2 = l2Normalize(new Float32Array(512).fill(0.95));
+    const v3 = l2Normalize(new Float32Array(512).fill(1.05));
+    const v4 = l2Normalize(new Float32Array(512).fill(0.98));
+
+    // Outlier: alternating signs so dot product with all-positive vector is 0
+    const outlier = new Float32Array(512);
+    for (let i = 0; i < 512; i++) {
+      outlier[i] = i % 2 === 0 ? 1.0 : -1.0;
+    }
+    const vOutlier = l2Normalize(outlier);
+
+    const burst = [v1, v2, v3, v4, vOutlier];
+    const initialCentroid = computeCentroidEmbedding(burst);
+
+    const qualified = burst.filter((v) => dotProduct(v, initialCentroid) >= 0.70);
+    assert(qualified.length === 4, 'OutlierFiltering: Successfully dropped outlier with similarity < 0.70');
+    assert(!qualified.includes(vOutlier), 'OutlierFiltering: Excluded noisy outlier from final set');
+
+    const finalCentroid = computeCentroidEmbedding(qualified);
+    assert(finalCentroid.length === 512, 'OutlierFiltering: Re-computed clean 512D centroid');
   }
 
   console.log(`--- Biometric Enrollment Tests Completed: ${passed} passed, ${failed} failed ---`);

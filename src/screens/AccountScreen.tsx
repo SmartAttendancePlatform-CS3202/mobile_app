@@ -123,7 +123,6 @@ export default function AccountScreen() {
     );
   };
 
-  // Helper function to render a dash ("—") if a database field is null or empty
   const val = (v?: string | number | null) => {
     if (v !== undefined && v !== null && String(v).trim() !== '') {
       return String(v);
@@ -131,59 +130,21 @@ export default function AccountScreen() {
     return '—';
   };
 
-  const getStatusBadge = (status?: string) => {
-    const s = (status || 'active').toLowerCase();
-    if (s === 'active') {
-      return {
-        label: 'Active Student',
-        bg: '#ECFDF5',
-        text: '#059669',
-        dot: '#10B981',
-        border: '#A7F3D0',
-      };
-    }
-    if (s === 'pending_approval' || s === 'pending') {
-      return {
-        label: 'Pending Approval',
-        bg: '#FFFBEB',
-        text: '#D97706',
-        dot: '#F59E0B',
-        border: '#FDE68A',
-      };
-    }
-    return {
-      label: s.charAt(0).toUpperCase() + s.slice(1),
-      bg: '#FEF2F2',
-      text: '#DC2626',
-      dot: '#EF4444',
-      border: '#FECACA',
-    };
-  };
-
   if (authLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4F46E5" />
+        <ActivityIndicator size="large" color="#094cb2" />
       </View>
     );
   }
-
-  const statusBadge = getStatusBadge(currentStudent?.status);
-  const roleDisplay = currentStudent?.role
-    ? currentStudent.role === 'student'
-      ? 'Undergraduate Student'
-      : currentStudent.role.charAt(0).toUpperCase() + currentStudent.role.slice(1)
-    : 'Undergraduate Student';
 
   return (
     <View style={styles.container}>
       {/* Top Header */}
       <View style={styles.topHeader}>
-        <View>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.headerAccentBar} />
           <Text style={styles.headerTitle}>Profile</Text>
-          <Text style={styles.headerSubtitle}>
-            {isAuthenticated ? 'Student Profile & Settings' : 'Guest Portal'}
-          </Text>
         </View>
 
         {isAuthenticated ? (
@@ -192,7 +153,7 @@ export default function AccountScreen() {
             onPress={handleSignOutPress}
             activeOpacity={0.8}
           >
-            <Ionicons name="log-out-outline" size={16} color="#EF4444" style={{ marginRight: 5 }} />
+            <Ionicons name="log-out-outline" size={16} color="#094cb2" style={{ marginRight: 5 }} />
             <Text style={styles.signOutButtonText}>Sign Out</Text>
           </TouchableOpacity>
         ) : (
@@ -201,7 +162,7 @@ export default function AccountScreen() {
             onPress={handleSignInPress}
             activeOpacity={0.8}
           >
-            <Ionicons name="log-in-outline" size={16} color="#FFFFFF" style={{ marginRight: 5 }} />
+            <Ionicons name="log-in-outline" size={16} color="#094cb2" style={{ marginRight: 5 }} />
             <Text style={styles.signInButtonText}>Sign In</Text>
           </TouchableOpacity>
         )}
@@ -210,27 +171,25 @@ export default function AccountScreen() {
       <ScrollView
         style={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        contentContainerStyle={{ paddingBottom: 40, paddingTop: 10 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#4F46E5']}
-            tintColor="#4F46E5"
+            colors={['#094cb2']}
+            tintColor="#094cb2"
           />
         }
       >
         {isAuthenticated && currentStudent ? (
-          /* ========================================================================= */
-          /* SIGNED IN VIEW - Database-Backed Student Details                           */
-          /* ========================================================================= */
           <>
-            {/* 1. Profile Hero Card */}
+            {/* 1. Hero Profile Card */}
             <View style={styles.heroCard}>
+              <View style={styles.heroGradientBar} />
               <View style={styles.avatarWrapper}>
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarText}>
-                    {currentStudent.name ? currentStudent.name.charAt(0).toUpperCase() : 'S'}
+                    {currentStudent.name ? currentStudent.name.charAt(0).toUpperCase() : 'R'}
                   </Text>
                 </View>
                 {isFaceRegistered && (
@@ -241,41 +200,31 @@ export default function AccountScreen() {
               </View>
 
               <Text style={styles.studentName}>{currentStudent.name || currentStudent.displayName || 'Student'}</Text>
-              
-              {currentStudent.nameWithInitials && currentStudent.nameWithInitials !== currentStudent.name && (
-                <Text style={styles.studentInitials}>{currentStudent.nameWithInitials}</Text>
-              )}
-
               <Text style={styles.studentEmail}>{currentStudent.email}</Text>
 
               <View style={styles.badgeRow}>
                 {currentStudent.indexNumber && (
                   <View style={styles.indexBadge}>
-                    <Ionicons name="id-card-outline" size={13} color="#4F46E5" style={{ marginRight: 4 }} />
-                    <Text style={styles.indexBadgeText}>Index: {currentStudent.indexNumber}</Text>
+                    <Text style={styles.indexBadgeTextLight}>Index: </Text>
+                    <Text style={styles.indexBadgeTextBold}>{currentStudent.indexNumber}</Text>
                   </View>
                 )}
-
-                <View style={[styles.statusBadge, { backgroundColor: statusBadge.bg, borderColor: statusBadge.border }]}>
-                  <View style={[styles.statusDot, { backgroundColor: statusBadge.dot }]} />
-                  <Text style={[styles.statusBadgeText, { color: statusBadge.text }]}>{statusBadge.label}</Text>
+                <View style={styles.roleBadge}>
+                  <Text style={styles.roleBadgeText}>STUDENT</Text>
                 </View>
-
-                {currentStudent.role && (
-                  <View style={styles.roleBadge}>
-                    <Text style={styles.roleBadgeText}>{currentStudent.role.toUpperCase()}</Text>
-                  </View>
-                )}
               </View>
             </View>
 
-            {/* 2. Academic Information Card (Strictly Database Attributes) */}
+            {/* 2. Academic Information Section */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIconWrap}>
-                  <Ionicons name="school" size={18} color="#4F46E5" />
+                  <Ionicons name="school" size={18} color="#094cb2" />
                 </View>
-                <Text style={styles.sectionTitle}>Academic Information</Text>
+                <View>
+                  <Text style={styles.sectionTitle}>Academic Information</Text>
+                  <Text style={styles.sectionSubtitle}>Faculty records & curriculum cohort</Text>
+                </View>
               </View>
 
               <View style={styles.infoRow}>
@@ -283,7 +232,7 @@ export default function AccountScreen() {
                 <Text style={styles.infoValue}>{val(currentStudent.facultyName)}</Text>
               </View>
               <View style={styles.divider} />
-
+              
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Department</Text>
                 <Text style={styles.infoValue}>{val(currentStudent.department)}</Text>
@@ -291,20 +240,8 @@ export default function AccountScreen() {
               <View style={styles.divider} />
 
               <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Department Code</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.departmentCode)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Faculty Head</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.facultyHead)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Academic Year</Text>
-                <Text style={styles.infoValueHighlight}>{val(currentStudent.academicYear)}</Text>
+                <Text style={styles.infoValue}>{val(currentStudent.academicYear)}</Text>
               </View>
               <View style={styles.divider} />
 
@@ -312,23 +249,25 @@ export default function AccountScreen() {
                 <Text style={styles.infoLabel}>Year Level</Text>
                 <Text style={styles.infoValue}>
                   {currentStudent.yearLevel !== undefined && currentStudent.yearLevel !== null
-                    ? `Year ${currentStudent.yearLevel}`
+                    ? `Level ${currentStudent.yearLevel}`
                     : '—'}
                 </Text>
               </View>
             </View>
 
-            {/* Enrolled Modules Card */}
+            {/* 3. Enrolled Modules Section */}
             <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconWrap}>
-                  <Ionicons name="book" size={18} color="#4F46E5" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.sectionTitle}>Enrolled Modules</Text>
-                  <Text style={styles.sectionSubtitle}>
-                    {modules.length} {modules.length === 1 ? 'Course' : 'Courses'} • {totalCredits} Total Credits
-                  </Text>
+              <View style={[styles.sectionHeader, { justifyContent: 'space-between' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={styles.sectionIconWrap}>
+                    <Ionicons name="book" size={18} color="#094cb2" />
+                  </View>
+                  <View>
+                    <Text style={styles.sectionTitle}>Enrolled Modules</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      {modules.length} Courses • {totalCredits} Total Credits
+                    </Text>
+                  </View>
                 </View>
                 <TouchableOpacity
                   style={styles.syncIconButton}
@@ -337,22 +276,22 @@ export default function AccountScreen() {
                   disabled={syncingModules}
                 >
                   {syncingModules ? (
-                    <ActivityIndicator size="small" color="#4F46E5" />
+                    <ActivityIndicator size="small" color="#434653" />
                   ) : (
-                    <Ionicons name="sync" size={18} color="#4F46E5" />
+                    <Ionicons name="refresh" size={18} color="#434653" />
                   )}
                 </TouchableOpacity>
               </View>
 
               {modulesLoading ? (
                 <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#4F46E5" />
-                  <Text style={{ marginTop: 8, color: '#6B7280', fontSize: 13 }}>Loading enrolled modules...</Text>
+                  <ActivityIndicator size="small" color="#094cb2" />
+                  <Text style={{ marginTop: 8, color: '#737784', fontSize: 13 }}>Loading enrolled modules...</Text>
                 </View>
               ) : modules.length === 0 ? (
                 <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-                  <Ionicons name="school-outline" size={36} color="#9CA3AF" />
-                  <Text style={{ marginTop: 8, color: '#6B7280', fontSize: 14, fontWeight: '500' }}>
+                  <Ionicons name="school-outline" size={36} color="#c3c6d5" />
+                  <Text style={{ marginTop: 8, color: '#434653', fontSize: 14, fontWeight: '500' }}>
                     No enrolled modules found in database
                   </Text>
                   <TouchableOpacity
@@ -360,91 +299,36 @@ export default function AccountScreen() {
                     onPress={handleSyncModulesPress}
                     disabled={syncingModules}
                   >
-                    <Ionicons name="sync-outline" size={15} color="#4F46E5" style={{ marginRight: 6 }} />
+                    <Ionicons name="sync-outline" size={15} color="#094cb2" style={{ marginRight: 6 }} />
                     <Text style={styles.syncButtonOutlineText}>Import from University DB</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
-                <View style={{ marginTop: 6 }}>
+                <View style={styles.modulesList}>
                   {modules.map((m, idx) => (
-                    <View key={m.id || idx}>
-                      <View style={styles.moduleItemRow}>
-                        <View style={styles.moduleCodeBadge}>
-                          <Text style={styles.moduleCodeBadgeText}>{m.courseCode}</Text>
-                        </View>
-                        <View style={{ flex: 1, marginHorizontal: 10 }}>
-                          <Text style={styles.moduleTitle} numberOfLines={1}>{m.courseName}</Text>
-                          <Text style={styles.moduleMeta}>
-                            {m.lecturer ? `Lecturer: ${m.lecturer}` : ''}
-                            {m.lecturer && m.venue ? ' • ' : ''}
-                            {m.venue ? `Venue: ${m.venue}` : ''}
-                          </Text>
-                        </View>
-                        <View style={styles.creditsBadge}>
-                          <Text style={styles.creditsBadgeText}>{m.credits ?? 3} Cr</Text>
-                        </View>
+                    <View key={m.id || idx} style={styles.moduleCard}>
+                      <View style={styles.moduleCodeBadge}>
+                        <Text style={styles.moduleCodeBadgeText}>{m.courseCode}</Text>
                       </View>
-                      {idx < modules.length - 1 && <View style={styles.divider} />}
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <Text style={styles.moduleTitle} numberOfLines={1}>{m.courseName}</Text>
+                      </View>
                     </View>
                   ))}
                 </View>
               )}
             </View>
 
-            {/* 3. Personal & Contact Details Card (Directly from students DB table) */}
+            {/* 4. Biometrics & Security Section */}
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionIconWrap}>
-                  <Ionicons name="id-card" size={18} color="#4F46E5" />
+                  <Ionicons name="shield-checkmark" size={18} color="#094cb2" />
                 </View>
-                <Text style={styles.sectionTitle}>Personal & Contact Details</Text>
-              </View>
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>National ID (NIC)</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.nic)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Date of Birth</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.dateOfBirth)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Gender</Text>
-                <Text style={styles.infoValue}>
-                  {currentStudent.gender
-                    ? currentStudent.gender.charAt(0).toUpperCase() + currentStudent.gender.slice(1)
-                    : '—'}
-                </Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Contact Number</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.contactNumber)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Residential Address</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.address)}</Text>
-              </View>
-            </View>
-
-            {/* 4. Biometrics & Security (One-Time Registration Rule) */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={[styles.sectionIconWrap, { backgroundColor: isFaceRegistered ? '#ECFDF5' : '#FEF3C7' }]}>
-                  <Ionicons
-                    name={isFaceRegistered ? 'shield-checkmark' : 'alert-circle'}
-                    size={18}
-                    color={isFaceRegistered ? '#10B981' : '#D97706'}
-                  />
+                <View>
+                  <Text style={styles.sectionTitle}>Biometrics & Security</Text>
+                  <Text style={styles.sectionSubtitle}>Identity authentication credentials</Text>
                 </View>
-                <Text style={styles.sectionTitle}>Biometrics & Security</Text>
               </View>
 
               <View style={styles.biometricStatusRow}>
@@ -460,7 +344,7 @@ export default function AccountScreen() {
                   <Ionicons
                     name={isFaceRegistered ? 'checkmark-circle' : 'close-circle'}
                     size={14}
-                    color={isFaceRegistered ? '#10B981' : '#D97706'}
+                    color={isFaceRegistered ? '#ffffff' : '#D97706'}
                     style={{ marginRight: 4 }}
                   />
                   <Text style={[styles.bioStatusText, isFaceRegistered ? styles.bioTextSuccess : styles.bioTextWarning]}>
@@ -470,98 +354,62 @@ export default function AccountScreen() {
               </View>
 
               {isFaceRegistered ? (
-                /* Unlocked for testing: allow re-registering face biometrics directly */
-                <View style={{ marginTop: 14 }}>
+                <>
                   <TouchableOpacity
                     style={styles.actionButtonSecondary}
                     onPress={() => setShowFaceRegModal(true)}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="refresh-circle" size={20} color="#4F46E5" style={{ marginRight: 8 }} />
+                    <Ionicons name="camera-outline" size={16} color="#094cb2" style={{ marginRight: 8 }} />
                     <Text style={styles.actionButtonSecondaryText}>Re-register Face Biometrics</Text>
                   </TouchableOpacity>
                   <View style={styles.unlockedNoticeBox}>
-                    <Ionicons name="flask-outline" size={15} color="#6366F1" style={{ marginRight: 6 }} />
+                    <Ionicons name="flask-outline" size={15} color="#094cb2" style={{ marginRight: 6, marginTop: 2 }} />
                     <Text style={styles.unlockedNoticeText}>
-                      Testing Mode: Biometric re-registration is unlocked. Capturing a new face will update your active database profile.
+                      <Text style={{ fontWeight: '700', color: '#094cb2' }}>Testing Mode: </Text>
+                      Biometric re-registration is unlocked. Capturing a new face will update your active database profile.
                     </Text>
                   </View>
-                </View>
+                </>
               ) : (
-                /* Not registered: show the register face button */
                 <TouchableOpacity
-                  style={[styles.actionButtonPrimary, { marginTop: 14 }]}
+                  style={[styles.actionButtonSecondary, { marginTop: 14 }]}
                   onPress={() => setShowFaceRegModal(true)}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="camera" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.actionButtonPrimaryText}>Register Face Biometrics</Text>
+                  <Ionicons name="camera" size={18} color="#094cb2" style={{ marginRight: 8 }} />
+                  <Text style={styles.actionButtonSecondaryText}>Register Face Biometrics</Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* 5. Account Details Card */}
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionIconWrap}>
-                  <Ionicons name="person-circle" size={18} color="#4F46E5" />
-                </View>
-                <Text style={styles.sectionTitle}>Account Details</Text>
-              </View>
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>University Email</Text>
-                <Text style={styles.infoValue}>{val(currentStudent.email)}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Role</Text>
-                <Text style={styles.infoValue}>{roleDisplay}</Text>
-              </View>
-              <View style={styles.divider} />
-
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Account Status</Text>
-                <Text style={styles.infoValue}>
-                  {currentStudent.status
-                    ? currentStudent.status.charAt(0).toUpperCase() + currentStudent.status.slice(1)
-                    : 'Active'}
-                </Text>
-              </View>
-            </View>
-
             {/* Subtle Footer Note */}
             <View style={styles.footerWrap}>
-              <Text style={styles.footerText}>Smart Attendance System • v1.0.0</Text>
+              <Text style={styles.footerText}>Alexandria Scholarly Platform • v1.0.0</Text>
             </View>
           </>
         ) : (
-          /* ========================================================================= */
-          /* SIGNED OUT VIEW - Clean Guest Portal                                      */
-          /* ========================================================================= */
+          /* SIGNED OUT VIEW */
           <View style={styles.signedOutContainer}>
-            <View style={styles.signedOutHero}>
+            <View style={styles.heroCard}>
               <View style={styles.signedOutAvatar}>
-                <Ionicons name="person-outline" size={44} color="#9CA3AF" />
+                <Ionicons name="person-outline" size={44} color="#737784" />
               </View>
-              <Text style={styles.signedOutTitle}>Not Signed In</Text>
-              <Text style={styles.signedOutSubtitle}>
-                Sign in with your University student credentials to access your profile, academic details, personalized timetable, and live attendance check-ins.
+              <Text style={styles.studentName}>Not Signed In</Text>
+              <Text style={[styles.studentEmail, { paddingHorizontal: 20 }]}>
+                Sign in with your University credentials to access your profile and live attendance check-ins.
               </Text>
-
               <TouchableOpacity
-                style={styles.primarySignInButton}
+                style={styles.actionButtonSecondary}
                 onPress={handleSignInPress}
                 activeOpacity={0.85}
               >
-                <Ionicons name="log-in-outline" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                <Text style={styles.primarySignInButtonText}>Sign In with Student Account</Text>
+                <Ionicons name="log-in-outline" size={18} color="#094cb2" style={{ marginRight: 8 }} />
+                <Text style={styles.actionButtonSecondaryText}>Sign In with Student Account</Text>
               </TouchableOpacity>
             </View>
-
             <View style={styles.footerWrap}>
-              <Text style={styles.footerText}>Smart Attendance System • v1.0.0</Text>
+              <Text style={styles.footerText}>Alexandria Scholarly Platform • v1.0.0</Text>
             </View>
           </View>
         )}
@@ -574,14 +422,14 @@ export default function AccountScreen() {
         presentationStyle="pageSheet"
         onRequestClose={() => setShowLoginModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+        <View style={{ flex: 1, backgroundColor: '#f7f8fa' }}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Sign In</Text>
             <TouchableOpacity
               onPress={() => setShowLoginModal(false)}
               style={styles.modalCloseButton}
             >
-              <Ionicons name="close" size={24} color="#6B7280" />
+              <Ionicons name="close" size={24} color="#1b1c1d" />
             </TouchableOpacity>
           </View>
           <LoginScreen onLoginSuccess={handleLoginSuccess} />
@@ -595,13 +443,13 @@ export default function AccountScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowFaceRegModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+        <View style={{ flex: 1, backgroundColor: '#f7f8fa' }}>
           <View style={styles.modalHeaderFullScreen}>
             <TouchableOpacity
               onPress={() => setShowFaceRegModal(false)}
               style={styles.modalCloseButton}
             >
-              <Ionicons name="arrow-back" size={24} color="#111827" />
+              <Ionicons name="arrow-back" size={24} color="#1b1c1d" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>
               {isFaceRegistered ? 'Re-register Face Biometrics' : 'Face Biometrics Registration'}
@@ -620,108 +468,126 @@ export default function AccountScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f7f8fa',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f7f8fa',
   },
   topHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 40,
     paddingBottom: 14,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f7f8fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eceeef',
+  },
+  headerAccentBar: {
+    width: 6,
+    height: 24,
+    backgroundColor: '#094cb2',
+    borderRadius: 3,
+    marginRight: 8,
   },
   headerTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
-    fontWeight: '500',
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    letterSpacing: -0.5,
   },
   signOutButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#FECACA',
-    shadowColor: '#EF4444',
-    shadowOpacity: 0.08,
+    borderColor: '#e5e7eb',
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
   },
   signOutButtonText: {
-    color: '#EF4444',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#1b1c1d',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   signInButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 20,
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
   signInButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
+    color: '#1b1c1d',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   scrollContent: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   heroCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 22,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
     alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#e5e7eb',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  heroGradientBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 6,
+    backgroundColor: '#094cb2',
   },
   avatarWrapper: {
     position: 'relative',
     marginBottom: 12,
+    marginTop: 4,
   },
   avatarCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#4F46E5',
+    backgroundColor: '#094cb2',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4F46E5',
+    shadowColor: '#094cb2',
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
+    borderWidth: 4,
+    borderColor: 'rgba(217, 226, 255, 0.5)',
   },
   avatarText: {
     color: '#FFFFFF',
-    fontSize: 34,
-    fontWeight: '800',
+    fontSize: 30,
+    fontWeight: 'bold',
   },
   verifiedCheck: {
     position: 'absolute',
@@ -737,22 +603,16 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   studentName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 2,
-    textAlign: 'center',
-  },
-  studentInitials: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#4B5563',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginBottom: 4,
     textAlign: 'center',
+    letterSpacing: -0.3,
   },
   studentEmail: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 12,
+    color: '#434653',
     marginBottom: 14,
     textAlign: 'center',
   },
@@ -766,147 +626,168 @@ const styles = StyleSheet.create({
   indexBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    backgroundColor: '#f5f3f4',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E0E7FF',
+    borderColor: '#c3c6d5',
   },
-  indexBadgeText: {
+  indexBadgeTextLight: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#4F46E5',
+    fontWeight: '500',
+    color: '#434653',
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
-  },
-  statusBadgeText: {
+  indexBadgeTextBold: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: 'bold',
+    color: '#1b1c1d',
   },
   roleBadge: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#d9e2ff',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    paddingVertical: 4,
+    borderRadius: 20,
   },
   roleBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4B5563',
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#001946',
+    letterSpacing: 0.5,
   },
   sectionCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     borderRadius: 16,
-    padding: 18,
+    padding: 20,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#e5e7eb',
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f1f3',
+    paddingBottom: 10,
   },
   sectionIconWrap: {
     width: 32,
     height: 32,
-    borderRadius: 10,
-    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    backgroundColor: '#d9e2ff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+  },
+  sectionSubtitle: {
+    fontSize: 11,
+    color: '#737784',
+    marginTop: 2,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: 9,
+    alignItems: 'center',
+    paddingVertical: 10,
   },
   infoLabel: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 12,
+    color: '#434653',
     fontWeight: '500',
     flex: 1,
   },
   infoValue: {
-    fontSize: 13,
-    color: '#111827',
-    fontWeight: '600',
-    flex: 1.5,
-    textAlign: 'right',
-  },
-  infoValueMono: {
-    fontSize: 11,
-    color: '#374151',
-    fontWeight: '600',
-    fontFamily: 'monospace',
-    flex: 1.8,
-    textAlign: 'right',
-  },
-  infoValueHighlight: {
-    fontSize: 13,
-    color: '#4F46E5',
-    fontWeight: '700',
+    fontSize: 12,
+    color: '#1b1c1d',
+    fontWeight: 'bold',
     flex: 1.5,
     textAlign: 'right',
   },
   divider: {
     height: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f2f3f5',
+  },
+  syncIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f5f3f4',
+    borderWidth: 1,
+    borderColor: '#c3c6d5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modulesList: {
+    flexDirection: 'column',
+    gap: 10,
+    marginTop: 6,
+  },
+  moduleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#faf9fa',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e8eaed',
+  },
+  moduleCodeBadge: {
+    backgroundColor: '#1b1c1d',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 6,
+    width: 72,
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  moduleCodeBadgeText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  moduleTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1b1c1d',
+    textTransform: 'capitalize',
   },
   biometricStatusRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
   },
   biometricTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 3,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1b1c1d',
+    marginBottom: 2,
   },
   biometricSubtitle: {
-    fontSize: 12,
-    color: '#6B7280',
-    lineHeight: 17,
+    fontSize: 11,
+    color: '#434653',
+    lineHeight: 16,
   },
   bioStatusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 8,
   },
   bioPillSuccess: {
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
+    backgroundColor: '#1b1c1d',
   },
   bioPillWarning: {
     backgroundColor: '#FFFBEB',
@@ -914,80 +795,45 @@ const styles = StyleSheet.create({
     borderColor: '#FDE68A',
   },
   bioStatusText: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '600',
   },
   bioTextSuccess: {
-    color: '#059669',
+    color: '#ffffff',
   },
   bioTextWarning: {
     color: '#D97706',
-  },
-  lockedNoticeBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  lockedNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#4B5563',
-    lineHeight: 18,
-    fontWeight: '500',
-  },
-  actionButtonPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4F46E5',
-    paddingVertical: 12,
-    borderRadius: 10,
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  actionButtonPrimaryText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
   actionButtonSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EEF2FF',
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#C7D2FE',
+    backgroundColor: '#ffffff',
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d9e2ff',
+    marginTop: 16,
   },
   actionButtonSecondaryText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#4F46E5',
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#094cb2',
   },
   unlockedNoticeBox: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F3FF',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginTop: 10,
+    alignItems: 'flex-start',
+    backgroundColor: '#d9e2ff',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 14,
     borderWidth: 1,
-    borderColor: '#DDD6FE',
+    borderColor: '#b1c5ff',
   },
   unlockedNoticeText: {
     flex: 1,
     fontSize: 11,
-    color: '#6D28D9',
-    fontWeight: '500',
+    color: '#1b1c1d',
     lineHeight: 16,
   },
   footerWrap: {
@@ -995,67 +841,21 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   footerText: {
-    fontSize: 12,
-    color: '#9CA3AF',
+    fontSize: 11,
+    color: '#737784',
     fontWeight: '500',
   },
   signedOutContainer: {
     marginTop: 10,
   },
-  signedOutHero: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 26,
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-  },
   signedOutAvatar: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f5f3f4',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
-  },
-  signedOutTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111827',
-    marginBottom: 8,
-  },
-  signedOutSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 21,
-    marginBottom: 20,
-    paddingHorizontal: 8,
-  },
-  primarySignInButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4F46E5',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    width: '100%',
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  primarySignInButtonText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1064,7 +864,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f7f8fa',
   },
   modalHeaderFullScreen: {
     flexDirection: 'row',
@@ -1073,31 +873,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 50,
     paddingBottom: 12,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f7f8fa',
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#eceeef',
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: 'bold',
+    color: '#1b1c1d',
   },
   modalCloseButton: {
     padding: 6,
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  syncIconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#EEF2FF',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   syncButtonOutline: {
     marginTop: 12,
@@ -1106,52 +892,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: '#EEF2FF',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#C7D2FE',
+    borderColor: '#d9e2ff',
   },
   syncButtonOutlineText: {
-    color: '#4F46E5',
+    color: '#094cb2',
     fontSize: 13,
     fontWeight: '600',
-  },
-  moduleItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  moduleCodeBadge: {
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-  },
-  moduleCodeBadgeText: {
-    color: '#4F46E5',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  moduleTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  moduleMeta: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  creditsBadge: {
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  creditsBadgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#4B5563',
-  },
+  }
 });

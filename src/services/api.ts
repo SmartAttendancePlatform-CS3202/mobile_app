@@ -1,7 +1,7 @@
 import apiClient, { BACKEND_BASE_URL } from './apiClient';
 import { supabase } from './supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StudentProfile, ClassSession, EnrolledModule, WeekDay, mockAcademicInfo } from './mockData';
+import { StudentProfile, ClassSession, EnrolledModule, WeekDay, mockAcademicInfo, AttendanceHistoryItem, mockAttendanceHistory } from './mockData';
 import { calculateHaversineDistance } from '../utils/geo';
 import { EMBEDDING_DIM } from '../embedding/faceEmbedding';
 
@@ -66,6 +66,82 @@ function mapOfferingToClassSession(offering: any): ClassSession {
     semester: offering.semester || undefined,
     offeringCode: offering.offering_code || undefined,
   };
+}
+
+function formatHeldDate(rawDate?: string | Date | null): string {
+  if (!rawDate) return '02 Oct 2026';
+  try {
+    const d = new Date(rawDate);
+    if (isNaN(d.getTime())) return String(rawDate);
+    return d.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return String(rawDate);
+  }
+}
+
+export function formatModuleTitle(courseCode?: string, courseName?: string, rawCourse?: string): string {
+  const code = (courseCode || '').trim();
+  const name = (courseName || '').trim();
+  const fallback = (rawCourse || '').trim();
+
+  console.log(`[FORMAT_TITLE] code: '${code}', name: '${name}', fallback: '${fallback}'`);
+
+  if (code && name && code !== 'COURSE' && name !== 'Class Session' && name !== 'Module' && code !== 'Module') {
+    if (name.toLowerCase().includes(code.toLowerCase())) {
+      return name;
+    }
+    return `${code} - ${name}`;
+  }
+  if (name && name !== 'Class Session' && name !== 'Module') {
+    return name;
+  }
+  if (code && code !== 'COURSE' && code !== 'Module') {
+    return code;
+  }
+  if (fallback && fallback !== 'COURSE Class Session' && fallback !== 'Module' && fallback !== 'Academic Module') {
+    return fallback;
+  }
+  return '';
+}
+
+export function extractCourseDetails(sessionData: any): {
+  courseCode: string;
+  courseName: string;
+  sessionNumber: number;
+  notes: string;
+  heldAt: string | undefined;
+  courseOfferingId?: string;
+} {
+  if (!sessionData) {
+    return { courseCode: '', courseName: '', sessionNumber: 1, notes: '', heldAt: undefined };
+  }
+
+  const session = Array.isArray(sessionData) ? sessionData[0] : sessionData;
+  const offering = Array.isArray(session?.course_offering) ? session?.course_offering[0] : session?.course_offering;
+  const course = Array.isArray(offering?.course) ? offering?.course[0] : offering?.course;
+
+  const rawCode = (course?.course_code || offering?.course_code || session?.course_code || '').trim();
+  const rawName = (course?.name || offering?.course_name || offering?.name || session?.course_name || '').trim();
+
+  const courseCode = (rawCode && rawCode !== 'COURSE' && rawCode !== 'Module') ? rawCode : '';
+  const courseName = (rawName && rawName !== 'Class Session' && rawName !== 'Module') ? rawName : '';
+  const sessionNumber = session?.session_number || 1;
+  const notes = (session?.notes || '').trim();
+  const heldAt = session?.held_at || session?.scheduled_at;
+  const courseOfferingId = session?.course_offering_id || offering?.id;
+
+  return { courseCode, courseName, sessionNumber, notes, heldAt, courseOfferingId };
+}
+
+function normalizeAttendanceStatus(rawStatus?: string): 'Present' | 'Late' | 'Absent' {
+  const s = (rawStatus || '').toLowerCase();
+  if (s.includes('late')) return 'Late';
+  if (s.includes('present')) return 'Present';
+  return 'Absent';
 }
 
 class ApiService {
@@ -530,9 +606,9 @@ class ApiService {
 
   private extractVenueCoordinates(venueData: any) {
     const boundary = venueData.boundary_data || {};
-    let lat = boundary.latitude ?? boundary.center?.lat;
-    let lng = boundary.longitude ?? boundary.center?.lng;
-    let radius = boundary.radius_meters ?? boundary.radius_m ?? 30;
+    let lat = venueData.latitude ?? boundary.latitude ?? boundary.center?.lat;
+    let lng = venueData.longitude ?? boundary.longitude ?? boundary.center?.lng;
+    let radius = venueData.radius_meters ?? venueData.radius_m ?? boundary.radius_meters ?? boundary.radius_m ?? 30;
 
     // If shape is polygon and vertices array is given without explicit center, compute centroid
     if ((lat === undefined || lng === undefined) && Array.isArray(boundary.vertices) && boundary.vertices.length > 0) {
@@ -630,7 +706,8 @@ class ApiService {
     windowId: string,
     lat?: number,
     lng?: number,
-    faceEmbedding?: Float32Array | number[]
+    faceEmbedding?: Float32Array | number[],
+    depthFeatures?: number[]
   ): Promise<{
     success: boolean;
     is_match?: boolean;
@@ -653,10 +730,14 @@ class ApiService {
         latitude: lat,
         longitude: lng,
         face_embedding: embeddingArray,
+        depth_features: depthFeatures,
       });
 
       const resData = response.data;
       const isMatch = Boolean(resData?.is_match);
+      if (isMatch) {
+        this.invalidateHistoryCache().catch(() => {});
+      }
       return {
         success: isMatch,
         is_match: isMatch,
@@ -816,6 +897,7 @@ class ApiService {
               status: 'present',
               first_check_in_at: new Date().toISOString(),
             }, { onConflict: 'lecture_session_id,student_id' });
+          await this.invalidateHistoryCache(studentId);
         }
       } catch (attErr) {
         console.warn('Supabase attendance record write note:', attErr);
@@ -891,13 +973,319 @@ class ApiService {
     return { success: true, message: 'Deprecated, use checkInWithFace directly' };
   }
 
-  async getHistory() {
+  async getCachedHistory(studentId?: string): Promise<AttendanceHistoryItem[] | null> {
+    try {
+      const key = studentId ? `@attendance_history_cache_${studentId}` : '@attendance_history_cache_default';
+      const cached = await AsyncStorage.getItem(key);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const isCorrupted = parsed.some(
+            (item: any) =>
+              item.courseCode === 'COURSE' ||
+              item.courseCode === 'Module' ||
+              item.courseName === 'Class Session' ||
+              item.courseName === 'Module' ||
+              item.course === 'COURSE Class Session' ||
+              item.course === 'Module' ||
+              item.course === 'Academic Module' ||
+              (!item.courseCode && !item.courseName)
+          );
+          if (isCorrupted) {
+            await AsyncStorage.removeItem(key);
+            return null;
+          }
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to read attendance history cache:', e);
+    }
+    return null;
+  }
+
+  async setCachedHistory(studentId: string | undefined, data: AttendanceHistoryItem[]): Promise<void> {
+    try {
+      const key = studentId ? `@attendance_history_cache_${studentId}` : '@attendance_history_cache_default';
+      // Only cache valid items where course is not corrupted
+      const validToCache = (data || []).filter(
+        d => d.courseCode && d.courseCode !== 'COURSE' && d.courseCode !== 'Module'
+      );
+      if (validToCache.length > 0) {
+        await AsyncStorage.setItem(key, JSON.stringify(validToCache));
+        await AsyncStorage.setItem(`${key}_meta`, JSON.stringify({ lastSyncedAt: new Date().toISOString() }));
+      }
+    } catch (e) {
+      console.warn('Failed to write attendance history cache:', e);
+    }
+  }
+
+  async invalidateHistoryCache(studentId?: string): Promise<void> {
+    try {
+      const key = studentId ? `@attendance_history_cache_${studentId}` : '@attendance_history_cache_default';
+      await AsyncStorage.removeItem(key);
+    } catch {}
+  }
+
+  async getHistory(studentId?: string, forceRefresh: boolean = false): Promise<{ success: boolean; history: AttendanceHistoryItem[]; source: 'network' | 'supabase' | 'cache' | 'mock'; message?: string }> {
+    let resolvedStudentId = studentId;
+    if (!resolvedStudentId) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        resolvedStudentId = session?.user?.id;
+      } catch {}
+    }
+
+    // Preload enrolled classes for offline/fallback module name resolution
+    let cachedEnrolledOfferings: any[] = [];
+    try {
+      const cachedClassesJson = await AsyncStorage.getItem('@enrolled_classes_cache');
+      if (cachedClassesJson) {
+        cachedEnrolledOfferings = JSON.parse(cachedClassesJson) || [];
+      }
+    } catch {}
+
+    const resolveCourseFromCachedOfferings = (identifier?: string): { code: string; name: string } => {
+      if (!identifier || cachedEnrolledOfferings.length === 0) return { code: '', name: '' };
+      const match = cachedEnrolledOfferings.find(
+        (c: any) =>
+          c.id === identifier ||
+          c.courseOfferingId === identifier ||
+          c.offeringCode === identifier
+      );
+      if (match) {
+        return {
+          code: (match.courseCode || '').trim(),
+          name: (match.courseName || '').trim(),
+        };
+      }
+      return { code: '', name: '' };
+    };
+
+    // 1. Try FastAPI microservice via Kong
     try {
       const response = await apiClient.get('/attendance/me');
-      return { success: true, history: response.data || [] };
-    } catch (error: any) {
-      return { success: false, history: [], message: error.response?.data?.detail || error.message || 'Failed to fetch attendance history' };
+      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+        // Collect session IDs for module enrichment
+        const sessionIdsToEnrich = [
+          ...new Set(
+            response.data
+              .map((r: any) => r.lecture_session_id || r.lectureSessionId || r.session_id || r.sessionId || r.id)
+              .filter(Boolean)
+          ),
+        ];
+
+        const sessionMap = new Map<string, { courseCode: string; courseName: string; heldAt?: string; sessionNum?: number; notes?: string }>();
+        if (sessionIdsToEnrich.length > 0) {
+          try {
+            const { data: sessionRows } = await supabase
+              .from('lecture_sessions')
+              .select(`
+                id,
+                session_number,
+                notes,
+                held_at,
+                scheduled_at,
+                course_offering_id,
+                course_offering:course_offerings (
+                  id,
+                  offering_code,
+                  course:courses (course_code, name)
+                )
+              `)
+              .in('id', sessionIdsToEnrich);
+
+            if (sessionRows) {
+              for (const s of sessionRows as any[]) {
+                const details = extractCourseDetails(s);
+                let finalCode = details.courseCode;
+                let finalName = details.courseName;
+
+                if (!finalCode || !finalName) {
+                  const fallbackInfo = resolveCourseFromCachedOfferings(details.courseOfferingId || s.id);
+                  if (!finalCode) finalCode = fallbackInfo.code;
+                  if (!finalName) finalName = fallbackInfo.name;
+                }
+
+                sessionMap.set(s.id, {
+                  courseCode: finalCode,
+                  courseName: finalName,
+                  sessionNum: details.sessionNumber,
+                  notes: details.notes,
+                  heldAt: details.heldAt,
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('Session enrichment error:', e);
+          }
+        }
+
+        const historyList: AttendanceHistoryItem[] = response.data.map((r: any) => {
+          const sessId = r.lecture_session_id || r.lectureSessionId || r.session_id || r.sessionId || r.id;
+          const enriched = sessionMap.get(sessId);
+          const rawCode = (r.course_code && r.course_code !== 'COURSE' && r.course_code !== 'Module') ? r.course_code : (enriched?.courseCode || '');
+          const rawName = (r.course_name && r.course_name !== 'Class Session' && r.course_name !== 'Module') ? r.course_name : (enriched?.courseName || '');
+          
+          let courseCode = (rawCode || '').trim();
+          let courseName = (rawName || '').trim();
+
+          if (!courseCode || !courseName) {
+            const fallbackInfo = resolveCourseFromCachedOfferings(sessId);
+            if (!courseCode) courseCode = fallbackInfo.code;
+            if (!courseName) courseName = fallbackInfo.name;
+          }
+
+          const sessionNum = r.session_number || enriched?.sessionNum || 1;
+          const lectureName = r.lecture_name || (enriched?.notes ? `Lecture ${sessionNum}: ${enriched.notes}` : `Lecture ${sessionNum}`);
+          const heldAt = r.held_at || enriched?.heldAt || r.first_check_in_at || r.created_at || new Date().toISOString();
+          const dateFormatted = formatHeldDate(heldAt);
+          const status = normalizeAttendanceStatus(r.status);
+          const courseDisplay = formatModuleTitle(courseCode, courseName);
+
+          return {
+            id: r.id,
+            lectureSessionId: sessId,
+            courseCode,
+            courseName,
+            lectureName,
+            sessionNumber: sessionNum,
+            heldAt,
+            dateFormatted,
+            status,
+            course: courseDisplay,
+            date: typeof heldAt === 'string' ? heldAt.split('T')[0] : '',
+          };
+        });
+
+        // Persist to local phone cache only if we have resolved course codes
+        await this.setCachedHistory(resolvedStudentId, historyList);
+        return { success: true, history: historyList, source: 'network' };
+      }
+    } catch (e: any) {
+      console.log('Backend microservice /attendance/me unavailable, using direct Supabase DB fallback:', e?.message);
     }
+
+    // 2. Direct Supabase DB PostgREST Fallback
+    if (resolvedStudentId) {
+      try {
+        const { data, error } = await supabase
+          .from('attendance_records')
+          .select(`
+            id,
+            status,
+            first_check_in_at,
+            created_at,
+            lecture_session_id,
+            lecture_session:lecture_sessions (
+              id,
+              session_number,
+              notes,
+              scheduled_at,
+              held_at,
+              course_offering_id,
+              course_offering:course_offerings (
+                id,
+                offering_code,
+                course:courses (course_code, name)
+              )
+            )
+          `)
+          .eq('student_id', resolvedStudentId)
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          // Identify any records where nested join failed to produce courseCode
+          const missingSessionIds = data
+            .filter((r: any) => {
+              const details = extractCourseDetails(r.lecture_session);
+              return !details.courseCode || !details.courseName;
+            })
+            .map((r: any) => r.lecture_session_id || (Array.isArray(r.lecture_session) ? r.lecture_session[0]?.id : r.lecture_session?.id))
+            .filter(Boolean);
+
+          const fallbackSessionMap = new Map<string, { courseCode: string; courseName: string }>();
+          if (missingSessionIds.length > 0) {
+            try {
+              const { data: separateSessions } = await supabase
+                .from('lecture_sessions')
+                .select(`
+                  id,
+                  course_offering:course_offerings (
+                    course:courses (course_code, name)
+                  )
+                `)
+                .in('id', missingSessionIds);
+
+              if (separateSessions) {
+                for (const s of separateSessions as any[]) {
+                  const details = extractCourseDetails(s);
+                  if (details.courseCode || details.courseName) {
+                    fallbackSessionMap.set(s.id, { courseCode: details.courseCode, courseName: details.courseName });
+                  }
+                }
+              }
+            } catch {}
+          }
+
+          const historyList: AttendanceHistoryItem[] = data.map((r: any) => {
+            const details = extractCourseDetails(r.lecture_session);
+            const sessId = r.lecture_session_id || (Array.isArray(r.lecture_session) ? r.lecture_session[0]?.id : r.lecture_session?.id) || r.id;
+            
+            let courseCode = details.courseCode;
+            let courseName = details.courseName;
+
+            if (!courseCode || !courseName) {
+              const fallback = fallbackSessionMap.get(sessId);
+              if (fallback) {
+                if (!courseCode) courseCode = fallback.courseCode;
+                if (!courseName) courseName = fallback.courseName;
+              } else {
+                const cachedFallback = resolveCourseFromCachedOfferings(details.courseOfferingId || sessId);
+                if (!courseCode) courseCode = cachedFallback.code;
+                if (!courseName) courseName = cachedFallback.name;
+              }
+            }
+
+            const sessionNum = details.sessionNumber;
+            const notes = details.notes;
+            const lectureName = notes ? `Lecture ${sessionNum}: ${notes}` : `Lecture ${sessionNum}`;
+            const heldAt = details.heldAt || r.first_check_in_at || r.created_at;
+            const status = normalizeAttendanceStatus(r.status);
+            const courseDisplay = formatModuleTitle(courseCode, courseName);
+
+            return {
+              id: r.id,
+              lectureSessionId: sessId,
+              courseCode,
+              courseName,
+              lectureName,
+              sessionNumber: sessionNum,
+              heldAt,
+              dateFormatted: formatHeldDate(heldAt),
+              status,
+              course: courseDisplay,
+              date: typeof heldAt === 'string' ? heldAt.split('T')[0] : '',
+            };
+          });
+
+          // Persist to local phone cache
+          await this.setCachedHistory(resolvedStudentId, historyList);
+          return { success: true, history: historyList, source: 'supabase' };
+        }
+      } catch (dbErr) {
+        console.warn('Supabase attendance history query note:', dbErr);
+      }
+    }
+
+    // 3. Local phone cache fallback (Offline / Airplane mode)
+    const cached = await this.getCachedHistory(resolvedStudentId);
+    if (cached && cached.length > 0) {
+      return { success: true, history: cached, source: 'cache' };
+    }
+
+    // 4. Mock Data Fallback
+    return { success: true, history: mockAttendanceHistory, source: 'mock' };
   }
 
 }

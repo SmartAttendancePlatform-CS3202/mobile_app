@@ -16,53 +16,15 @@ export interface PoseTarget {
   holdInstruction: string;
 }
 
-export const POSE_SEQUENCE: PoseTarget[] = [
-  {
-    pose: 'CENTER',
-    targetYaw: 0,
-    targetPitch: 0,
-    toleranceYaw: 12,
-    tolerancePitch: 10,
-    instruction: 'Look straight at the camera',
-    holdInstruction: 'Hold still...',
-  },
-  {
-    pose: 'LEFT',
-    targetYaw: -25,
-    targetPitch: 0,
-    toleranceYaw: 12,
-    tolerancePitch: 12,
-    instruction: 'Turn your head slightly to the left',
-    holdInstruction: 'Hold that position...',
-  },
-  {
-    pose: 'RIGHT',
-    targetYaw: 25,
-    targetPitch: 0,
-    toleranceYaw: 12,
-    tolerancePitch: 12,
-    instruction: 'Turn your head slightly to the right',
-    holdInstruction: 'Hold that position...',
-  },
-  {
-    pose: 'UP',
-    targetYaw: 0,
-    targetPitch: 15,
-    toleranceYaw: 12,
-    tolerancePitch: 10,
-    instruction: 'Tilt your head slightly up',
-    holdInstruction: 'Hold that position...',
-  },
-  {
-    pose: 'DOWN',
-    targetYaw: 0,
-    targetPitch: -15,
-    toleranceYaw: 12,
-    tolerancePitch: 10,
-    instruction: 'Tilt your head slightly down',
-    holdInstruction: 'Hold that position...',
-  },
-];
+export const POSE_SEQUENCE: PoseTarget[] = Array.from({ length: 5 }, () => ({
+  pose: 'CENTER',
+  targetYaw: 0,
+  targetPitch: 0,
+  toleranceYaw: 15,
+  tolerancePitch: 15,
+  instruction: 'Look straight at the camera',
+  holdInstruction: 'Hold still...',
+}));
 
 export interface PoseEvaluationResult {
   currentPose: GuidedPose;
@@ -83,7 +45,7 @@ export class PoseGuide {
   private currentIndex: number = 0;
   private stableFrames: number = 0;
   private readonly requiredFrames: number;
-  private completedPoses: Set<GuidedPose> = new Set();
+  private completedPoses: GuidedPose[] = [];
 
   constructor(requiredStableFrames: number = 3) {
     this.requiredFrames = requiredStableFrames;
@@ -109,7 +71,7 @@ export class PoseGuide {
   }
 
   public getCompletedPoses(): GuidedPose[] {
-    return Array.from(this.completedPoses);
+    return [...this.completedPoses];
   }
 
   /**
@@ -177,7 +139,7 @@ export class PoseGuide {
   public advance(): boolean {
     const current = this.getCurrentTarget();
     if (current) {
-      this.completedPoses.add(current.pose);
+      this.completedPoses.push(current.pose);
       this.currentIndex += 1;
       this.stableFrames = 0;
     }
@@ -187,6 +149,6 @@ export class PoseGuide {
   public reset(): void {
     this.currentIndex = 0;
     this.stableFrames = 0;
-    this.completedPoses.clear();
+    this.completedPoses = [];
   }
 }

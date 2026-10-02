@@ -18,14 +18,14 @@ import { ClassSession, AcademicHeaderInfo, mockAcademicInfo } from '../services/
 import Skeleton from '../components/Skeleton';
 
 const DAYS = [
-  { key: 'Monday', label: 'Mon' },
-  { key: 'Tuesday', label: 'Tue' },
-  { key: 'Wednesday', label: 'Wed' },
-  { key: 'Thursday', label: 'Thu' },
-  { key: 'Friday', label: 'Fri' },
-  { key: 'Saturday', label: 'Sat' },
-  { key: 'Sunday', label: 'Sun' },
-  { key: 'All', label: 'All' },
+  { key: 'Monday', label: 'Mon', date: '28' },
+  { key: 'Tuesday', label: 'Tue', date: '29' },
+  { key: 'Wednesday', label: 'Wed', date: '30' },
+  { key: 'Thursday', label: 'Thu', date: '31' },
+  { key: 'Friday', label: 'Fri', date: '01' },
+  { key: 'Saturday', label: 'Sat', date: '02' },
+  { key: 'Sunday', label: 'Sun', date: '03' },
+  { key: 'All', label: 'All', date: '*' },
 ];
 
 export default function TimetableScreen() {
@@ -117,47 +117,17 @@ export default function TimetableScreen() {
   const getTypeTheme = (type: string) => {
     switch (type) {
       case 'L':
-        return {
-          bg: '#EEF2FF',
-          text: '#4F46E5',
-          border: '#C7D2FE',
-          icon: 'book-outline',
-        };
+        return { bg: '#d9e2ff', text: '#094cb2', border: '#b1c5ff', icon: 'book' };
       case 'P':
-        return {
-          bg: '#ECFDF5',
-          text: '#059669',
-          border: '#A7F3D0',
-          icon: 'flask-outline',
-        };
+        return { bg: '#ECFDF5', text: '#059669', border: '#A7F3D0', icon: 'flask' };
       case 'L & P':
-        return {
-          bg: '#FDF4FF',
-          text: '#9333EA',
-          border: '#F0ABFC',
-          icon: 'layers-outline',
-        };
+        return { bg: '#FDF4FF', text: '#9333EA', border: '#F0ABFC', icon: 'layers' };
       case 'Event':
-        return {
-          bg: '#F0F9FF',
-          text: '#0284C7',
-          border: '#BAE6FD',
-          icon: 'ribbon-outline',
-        };
+        return { bg: '#F0F9FF', text: '#0284C7', border: '#BAE6FD', icon: 'ribbon' };
       case 'Break':
-        return {
-          bg: '#F3F4F6',
-          text: '#6B7280',
-          border: '#E5E7EB',
-          icon: 'restaurant-outline',
-        };
+        return { bg: '#f5f3f4', text: '#434653', border: '#e3e2e3', icon: 'restaurant' };
       default:
-        return {
-          bg: '#F3F4F6',
-          text: '#4B5563',
-          border: '#E5E7EB',
-          icon: 'calendar-outline',
-        };
+        return { bg: '#f5f3f4', text: '#434653', border: '#e3e2e3', icon: 'calendar' };
     }
   };
 
@@ -166,9 +136,9 @@ export default function TimetableScreen() {
       <View style={[styles.container, { padding: 16 }]}>
         <Skeleton height={100} borderRadius={16} style={{ marginBottom: 16, marginTop: 12 }} />
         <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-          <Skeleton width={60} height={36} borderRadius={12} />
-          <Skeleton width={60} height={36} borderRadius={12} />
-          <Skeleton width={60} height={36} borderRadius={12} />
+          <Skeleton width={60} height={56} borderRadius={14} />
+          <Skeleton width={60} height={56} borderRadius={14} />
+          <Skeleton width={60} height={56} borderRadius={14} />
         </View>
         <View style={{ gap: 14 }}>
           <Skeleton height={120} borderRadius={16} />
@@ -181,20 +151,9 @@ export default function TimetableScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Academic Header Banner */}
-      <View style={styles.headerCard}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.uomBadge}>
-            <Ionicons name="school" size={14} color="#4F46E5" />
-            <Text style={styles.uomBadgeText}>{academicInfo.university}</Text>
-          </View>
-          <View style={styles.termBadge}>
-            <Text style={styles.termBadgeText}>{academicInfo.term}</Text>
-          </View>
-        </View>
-
-        <Text style={styles.facultyText}>{academicInfo.faculty} • {academicInfo.department}</Text>
-        <Text style={styles.sessionText}>{academicInfo.session}</Text>
+      {/* Top Header */}
+      <View style={styles.topHeader}>
+        <Text style={styles.headerTitle}>Timetable</Text>
       </View>
 
       {/* Warning Notice if Face Not Registered */}
@@ -215,6 +174,37 @@ export default function TimetableScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Hero Card / Academic Banner */}
+      <View style={styles.heroCardWrapper}>
+        <View style={styles.heroCard}>
+          <View style={styles.heroGradientBar} />
+          <View style={styles.heroContent}>
+            <View style={styles.heroTopRow}>
+              <View style={styles.facultyBadge}>
+                <Ionicons name="school" size={14} color="#094cb2" style={{ marginRight: 4 }} />
+                <Text style={styles.facultyBadgeText}>{academicInfo.faculty}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.heroMiddleRow}>
+              <Text style={styles.academicYearText}>{academicInfo.session}</Text>
+              <Text style={styles.degreeText}>{academicInfo.department}</Text>
+            </View>
+
+            <View style={styles.heroBottomRow}>
+              <View style={styles.heroTag}>
+                <Text style={styles.heroTagText}>{academicInfo.term}</Text>
+              </View>
+              <View style={styles.heroTag}>
+                <Text style={styles.heroTagText}>Year 3</Text>
+              </View>
+              <Text style={styles.heroDot}>•</Text>
+              <Text style={styles.heroWeeksText}>14 Weeks remaining</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
       {/* Day Selector Pills */}
       <View style={styles.daySelectorContainer}>
         <ScrollView
@@ -227,16 +217,16 @@ export default function TimetableScreen() {
             return (
               <TouchableOpacity
                 key={day.key}
-                style={[styles.dayPill, isSelected && styles.dayPillActive]}
+                style={[styles.dayTab, isSelected && styles.dayTabActive]}
                 onPress={() => setSelectedDay(day.key)}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.dayPillText, isSelected && styles.dayPillTextActive]}>
+                <Text style={[styles.dayTabLabel, isSelected && styles.dayTabLabelActive]}>
                   {day.label}
                 </Text>
-                {day.key === currentDayName && (
-                  <View style={[styles.todayIndicator, isSelected && styles.todayIndicatorActive]} />
-                )}
+                <Text style={[styles.dayTabDate, isSelected && styles.dayTabDateActive]}>
+                  {day.date}
+                </Text>
               </TouchableOpacity>
             );
           })}
@@ -253,29 +243,18 @@ export default function TimetableScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#4F46E5']}
-            tintColor="#4F46E5"
+            colors={['#094cb2']}
+            tintColor="#094cb2"
           />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="calendar-clear-outline" size={48} color="#9CA3AF" />
+            <Ionicons name="calendar-clear-outline" size={48} color="#c3c6d5" />
             <Text style={styles.emptyTitle}>No Classes Scheduled for {selectedDay}</Text>
             <Text style={styles.emptySubtitle}>Enjoy your free time or pull down to refresh classes.</Text>
-            <TouchableOpacity
-              style={{
-                marginTop: 14,
-                backgroundColor: '#EEF2FF',
-                paddingVertical: 10,
-                paddingHorizontal: 18,
-                borderRadius: 12,
-                flexDirection: 'row',
-                alignItems: 'center',
-              }}
-              onPress={onRefresh}
-            >
-              <Ionicons name="sync-outline" size={16} color="#4F46E5" style={{ marginRight: 6 }} />
-              <Text style={{ color: '#4F46E5', fontWeight: '600', fontSize: 14 }}>Sync Enrolled Classes</Text>
+            <TouchableOpacity style={styles.syncButtonOutline} onPress={onRefresh}>
+              <Ionicons name="sync-outline" size={16} color="#094cb2" style={{ marginRight: 6 }} />
+              <Text style={styles.syncButtonOutlineText}>Sync Enrolled Classes</Text>
             </TouchableOpacity>
           </View>
         }
@@ -288,7 +267,7 @@ export default function TimetableScreen() {
               <View style={styles.breakRow}>
                 <View style={styles.breakLine} />
                 <View style={styles.breakCard}>
-                  <Ionicons name="restaurant-outline" size={16} color="#6B7280" />
+                  <Ionicons name="restaurant-outline" size={14} color="#6B7280" />
                   <Text style={styles.breakTitle}>Lunch Break</Text>
                   <Text style={styles.breakTime}>({item.startTime} - {item.endTime})</Text>
                 </View>
@@ -301,9 +280,11 @@ export default function TimetableScreen() {
             <View style={styles.timelineRow}>
               {/* Timeline Graphic */}
               <View style={styles.timelineGraphic}>
-                <View style={[styles.dot, item.isActive ? styles.activeDot : styles.inactiveDot]} />
+                <View style={[styles.dotContainer, item.isActive && styles.dotContainerActive]}>
+                  <View style={[styles.dot, item.isActive ? styles.activeDot : styles.inactiveDot]} />
+                </View>
                 {index !== filteredSessions.length - 1 && (
-                  <View style={[styles.line, item.isActive ? styles.activeLine : styles.inactiveLine]} />
+                  <View style={styles.line} />
                 )}
               </View>
 
@@ -325,12 +306,6 @@ export default function TimetableScreen() {
                     </View>
                   </View>
 
-                  {item.isActive && (
-                    <View style={styles.liveBadge}>
-                      <View style={styles.livePulseDot} />
-                      <Text style={styles.liveBadgeText}>LIVE</Text>
-                    </View>
-                  )}
                 </View>
 
                 {/* Course Name */}
@@ -338,36 +313,38 @@ export default function TimetableScreen() {
 
                 {/* Meta details */}
                 <View style={styles.detailsGrid}>
-                  {/* Venue */}
-                  <View style={styles.infoRow}>
-                    <Ionicons
-                      name={item.venue.toLowerCase().includes('online') ? "globe-outline" : "location-outline"}
-                      size={15}
-                      color="#4F46E5"
-                    />
-                    <Text style={styles.venueText}>{item.venue}</Text>
-                  </View>
-
                   {/* Lecturer */}
                   {item.lecturer && item.type !== 'Event' && (
                     <View style={styles.infoRow}>
-                      <Ionicons name="person-outline" size={15} color="#6B7280" />
+                      <Ionicons name="person" size={14} color="#094cb2" />
                       <Text style={styles.metaText}>{item.lecturer}</Text>
                     </View>
                   )}
 
-                  {/* Time & Duration */}
+                  {/* Venue */}
                   <View style={styles.infoRow}>
-                    <Ionicons name="time-outline" size={15} color="#6B7280" />
+                    <Ionicons
+                      name={item.venue.toLowerCase().includes('online') ? "globe" : "location"}
+                      size={14}
+                      color="#737784"
+                    />
+                    <Text style={styles.venueText}>{item.venue}</Text>
+                  </View>
+
+                  {/* Time */}
+                  <View style={styles.infoRow}>
+                    <Ionicons name="time" size={14} color="#737784" />
                     <Text style={styles.timeText}>
                       {item.startTime} - {item.endTime}
-                      {item.duration ? `  (${item.duration})` : ''}
+                    </Text>
+                    <Text style={styles.durationText}>
+                      {item.duration ? `(${item.duration})` : ''}
                     </Text>
                   </View>
 
                   {selectedDay === 'All' && (
                     <View style={styles.infoRow}>
-                      <Ionicons name="calendar-outline" size={15} color="#6B7280" />
+                      <Ionicons name="calendar" size={14} color="#737784" />
                       <Text style={styles.dayText}>{item.day}</Text>
                     </View>
                   )}
@@ -385,307 +362,405 @@ export default function TimetableScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#faf9fa',
   },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  headerCard: {
-    backgroundColor: '#FFFFFF',
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
-    padding: 16,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4F46E5',
-  },
-  headerTopRow: {
+  topHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    paddingBottom: 12,
+    backgroundColor: 'rgba(250, 249, 250, 0.9)',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eceeef',
+    zIndex: 10,
   },
-  uomBadge: {
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    letterSpacing: -0.5,
+  },
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    flex: 1,
-    marginRight: 8,
+    gap: 8,
   },
-  uomBadgeText: {
+  semPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#c3c6d5',
+  },
+  semPillText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#4F46E5',
-    marginLeft: 5,
+    fontWeight: 'bold',
+    color: '#434653',
+    marginRight: 4,
   },
-  termBadge: {
-    backgroundColor: '#111827',
+  searchButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#c3c6d5',
+  },
+  heroCardWrapper: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  heroCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    shadowColor: '#094cb2',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  heroGradientBar: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 6,
+    backgroundColor: '#094cb2',
+  },
+  heroContent: {
+    padding: 16,
+    paddingLeft: 22,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  facultyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  facultyBadgeText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#094cb2',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  activeTermBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+  },
+  activeTermDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+    marginRight: 4,
+  },
+  activeTermText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#047857',
+  },
+  heroMiddleRow: {
+    marginBottom: 10,
+  },
+  academicYearText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    marginBottom: 2,
+  },
+  degreeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#434653',
+  },
+  heroBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#f2f3f5',
+    paddingTop: 8,
+    gap: 8,
+  },
+  heroTag: {
+    backgroundColor: '#f5f3f4',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: 6,
   },
-  termBadgeText: {
+  heroTagText: {
     fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  facultyText: {
-    fontSize: 13,
-    color: '#374151',
     fontWeight: '600',
-    marginTop: 2,
+    color: '#434653',
   },
-  sessionText: {
+  heroDot: {
+    color: '#c3c6d5',
+    fontSize: 14,
+  },
+  heroWeeksText: {
     fontSize: 11,
-    color: '#6B7280',
-    marginTop: 2,
+    fontWeight: '500',
+    color: '#737784',
   },
   daySelectorContainer: {
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   dayScrollContent: {
     paddingHorizontal: 16,
-    gap: 8,
+    gap: 10,
   },
-  dayPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+  dayTab: {
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
     minWidth: 58,
+    height: 56,
+    paddingHorizontal: 12,
   },
-  dayPillActive: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-    shadowColor: '#4F46E5',
-    shadowOpacity: 0.25,
+  dayTabActive: {
+    backgroundColor: '#094cb2',
+    borderColor: '#094cb2',
+    shadowColor: '#094cb2',
+    shadowOpacity: 0.3,
     shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
   },
-  dayPillText: {
+  dayTabLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#737784',
+    textTransform: 'uppercase',
+  },
+  dayTabLabelActive: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+  dayTabDate: {
+    fontSize: 12,
+    color: '#737784',
+    marginTop: 2,
+  },
+  dayTabDateActive: {
+    color: '#ffffff',
+    fontWeight: 'bold',
     fontSize: 14,
-    fontWeight: '700',
-    color: '#4B5563',
-  },
-  dayPillTextActive: {
-    color: '#FFFFFF',
-  },
-  todayIndicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#4F46E5',
-    marginTop: 3,
-  },
-  todayIndicatorActive: {
-    backgroundColor: '#FFFFFF',
   },
   listContent: {
     paddingHorizontal: 16,
-    paddingBottom: 30,
-    paddingTop: 4,
+    paddingBottom: 40,
   },
   timelineRow: {
     flexDirection: 'row',
+    position: 'relative',
   },
   timelineGraphic: {
-    alignItems: 'center',
     width: 24,
-    marginRight: 10,
+    alignItems: 'center',
+    marginRight: 12,
+    position: 'relative',
+  },
+  line: {
+    position: 'absolute',
+    top: 24,
+    bottom: -24,
+    width: 2,
+    backgroundColor: '#c3c6d5',
+  },
+  dotContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 16,
+    zIndex: 2,
+  },
+  dotContainerActive: {
+    backgroundColor: 'rgba(9, 76, 178, 0.2)',
   },
   dot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    marginTop: 22,
-    zIndex: 1,
   },
   activeDot: {
-    backgroundColor: '#4F46E5',
-    borderWidth: 2.5,
-    borderColor: '#C7D2FE',
+    backgroundColor: '#094cb2',
+    borderWidth: 2,
+    borderColor: '#ffffff',
   },
   inactiveDot: {
-    backgroundColor: '#D1D5DB',
-  },
-  line: {
-    width: 2,
-    flex: 1,
-    marginTop: -4,
-    marginBottom: -22,
-  },
-  activeLine: {
-    backgroundColor: '#4F46E5',
-  },
-  inactiveLine: {
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#d9e2ff',
+    borderWidth: 2,
+    borderColor: '#ffffff',
   },
   card: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffffff',
     padding: 16,
     borderRadius: 16,
-    marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#F3F4F6',
+    borderColor: '#e5e7eb',
+    shadowColor: '#1b1c1d',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
   activeCard: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#FAFAFF',
+    borderColor: 'rgba(9, 76, 178, 0.3)',
+    backgroundColor: '#ffffff',
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   codeAndDay: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   courseCodeBadge: {
-    backgroundColor: '#1E293B',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
+    backgroundColor: '#1b1c1d',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   courseCodeText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: 'bold',
     letterSpacing: 0.5,
   },
   typeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
     borderWidth: 1,
   },
   typeBadgeText: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: 'bold',
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4F46E5',
+    backgroundColor: '#ecfdf5',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
   },
   livePulseDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#10B981',
+    backgroundColor: '#10b981',
     marginRight: 4,
   },
   liveBadgeText: {
-    color: '#FFFFFF',
+    color: '#047857',
     fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+    fontWeight: 'bold',
   },
   courseName: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginBottom: 10,
     lineHeight: 22,
   },
   detailsGrid: {
-    gap: 5,
+    gap: 6,
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  venueText: {
-    fontSize: 13,
-    color: '#4F46E5',
-    marginLeft: 6,
-    fontWeight: '700',
-  },
   metaText: {
-    fontSize: 13,
-    color: '#4B5563',
+    fontSize: 12,
+    color: '#094cb2',
+    fontWeight: '600',
     marginLeft: 6,
+  },
+  venueText: {
+    fontSize: 12,
+    color: '#434653',
     fontWeight: '500',
+    marginLeft: 6,
+    textTransform: 'capitalize',
   },
   timeText: {
-    fontSize: 13,
-    color: '#374151',
+    fontSize: 12,
+    color: '#1b1c1d',
+    fontWeight: 'bold',
     marginLeft: 6,
-    fontWeight: '600',
+  },
+  durationText: {
+    fontSize: 11,
+    color: '#737784',
+    marginLeft: 6,
   },
   dayText: {
     fontSize: 12,
-    color: '#6B7280',
-    marginLeft: 6,
+    color: '#737784',
     fontWeight: '500',
+    marginLeft: 6,
   },
   breakRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 8,
-    marginHorizontal: 12,
+    marginVertical: 12,
+    paddingLeft: 36,
   },
   breakLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#f2f3f5',
   },
   breakCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
     marginHorizontal: 8,
   },
   breakTitle: {
     fontSize: 12,
-    fontWeight: '700',
-    color: '#4B5563',
+    fontWeight: 'bold',
+    color: '#737784',
     marginLeft: 6,
   },
   breakTime: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: '#c3c6d5',
     marginLeft: 4,
   },
   emptyContainer: {
@@ -695,16 +770,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#374151',
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginTop: 12,
   },
   emptySubtitle: {
-    fontSize: 13,
-    color: '#6B7280',
+    fontSize: 12,
+    color: '#737784',
     textAlign: 'center',
     marginTop: 6,
+  },
+  syncButtonOutline: {
+    marginTop: 16,
+    backgroundColor: '#ffffff',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d9e2ff',
+  },
+  syncButtonOutlineText: {
+    color: '#094cb2',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   warningNotice: {
     flexDirection: 'row',
@@ -716,7 +807,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginHorizontal: 16,
-    marginBottom: 10,
+    marginBottom: 4,
+    marginTop: 16,
   },
   warningNoticeTitle: {
     fontSize: 13,
@@ -729,4 +821,3 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 });
-

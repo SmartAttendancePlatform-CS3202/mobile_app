@@ -38,8 +38,8 @@ export default function CheckInScreen() {
   const [landmarks, setLandmarks] = useState<LandmarkPoint[] | null>(null);
   const [frameWidth, setFrameWidth] = useState<number>(720);
   const [frameHeight, setFrameHeight] = useState<number>(1280);
-  const [layoutWidth, setLayoutWidth] = useState<number>(280);
-  const [layoutHeight, setLayoutHeight] = useState<number>(280);
+  const [layoutWidth, setLayoutWidth] = useState<number>(200);
+  const [layoutHeight, setLayoutHeight] = useState<number>(200);
   const [canVerifyManually, setCanVerifyManually] = useState<boolean>(false);
 
   const cameraRef = useRef<VisionCameraRef>(null);
@@ -57,7 +57,6 @@ export default function CheckInScreen() {
   const latestFaceRef = useRef<Face | null>(null);
   const faceDetectedStartTimeRef = useRef<number | null>(null);
 
-  // Subscribe to state machine transitions
   useEffect(() => {
     const unsubscribe = stateMachineRef.current.onStateChange((event) => {
       setLivenessState(event.to);
@@ -67,9 +66,6 @@ export default function CheckInScreen() {
     };
   }, []);
 
-  /**
-   * Real camera frame face capture & database verification
-   */
   const verifyCapturedFace = useCallback(async (face: Face) => {
     if (isProcessingRef.current || hasVerifiedRef.current) return;
     if (retryCount >= MAX_RETRIES) {
@@ -91,14 +87,12 @@ export default function CheckInScreen() {
         edgeContrastScore: 1.0,
       });
 
-      // 1. Capture real photo, crop to face with front-camera mirroring, extract real 192D RGB embedding
       setStatusText('Analyzing facial biometric features...');
       const captured = await captureAndProcessFace(cameraRef, face, true);
 
       stateMachineRef.current.handleEmbeddingReady({ embedding: captured.embedding });
       setStatusText('Matching face against registered profile in database...');
 
-      // 2. Discover active session window
       let activeWindowId = 'default_checkin_window';
       try {
         const windowsRes = await api.getActiveWindows(sessionId);
@@ -111,8 +105,7 @@ export default function CheckInScreen() {
         console.log('[CheckInScreen] Active window check note:', winErr);
       }
 
-      // 3. Verify real embedding with backend microservice / database
-      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding);
+      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding, captured.depthFeatures);
 
       if (!faceCheckRes.success || !faceCheckRes.is_match) {
         if (faceCheckRes.requires_re_registration) {
@@ -139,7 +132,6 @@ export default function CheckInScreen() {
         return;
       }
 
-      // Match confirmed against database!
       hasVerifiedRef.current = true;
       const matchScore = faceCheckRes.confidence ?? 1.0;
       setConfidence(matchScore);
@@ -160,15 +152,9 @@ export default function CheckInScreen() {
     }
   }, [sessionId, lat, lng, retryCount]);
 
-  /**
-   * Real-time face detection handler attached directly to VisionCamera MLKit output
-   */
   const handleFacesDetected = useCallback((faces: Face[]) => {
-    if (hasVerifiedRef.current || isProcessingRef.current) {
-      return;
-    }
+    if (hasVerifiedRef.current || isProcessingRef.current) return;
 
-    // Case 1: No face in frame (e.g. camera pointed at wall or random object)
     if (!faces || faces.length === 0) {
       latestFaceRef.current = null;
       faceDetectedStartTimeRef.current = null;
@@ -184,7 +170,6 @@ export default function CheckInScreen() {
       return;
     }
 
-    // Case 2: Multiple faces detected (anti-spoof / fraud precaution)
     if (faces.length > 1) {
       latestFaceRef.current = null;
       faceDetectedStartTimeRef.current = null;
@@ -196,7 +181,6 @@ export default function CheckInScreen() {
       return;
     }
 
-    // Case 3: Exactly 1 face in view
     const face = faces[0];
     latestFaceRef.current = face;
 
@@ -211,7 +195,6 @@ export default function CheckInScreen() {
     if (face.frameWidth && face.frameWidth > 0) setFrameWidth(face.frameWidth);
     if (face.frameHeight && face.frameHeight > 0) setFrameHeight(face.frameHeight);
 
-    // Update bounding box for overlay
     setBoundingBox({
       x: face.bounds.x,
       y: face.bounds.y,
@@ -219,7 +202,6 @@ export default function CheckInScreen() {
       height: face.bounds.height,
     });
 
-    // Map landmark points for visual overlay
     const lms: LandmarkPoint[] = [];
     if (face.landmarks?.LEFT_EYE) {
       lms.push({ x: face.landmarks.LEFT_EYE.x, y: face.landmarks.LEFT_EYE.y, name: 'leftEye' });
@@ -235,14 +217,12 @@ export default function CheckInScreen() {
     }
     setLandmarks(lms);
 
-    // Check face size: reject tiny/distant faces
     if (face.bounds.width < 80 || face.bounds.height < 80) {
       setStatusText('Move closer to the camera');
       setStatusState('ready');
       return;
     }
 
-    // State Machine & Active Liveness Progression
     if (livenessState === 'IDLE' || livenessState === 'TIMEOUT') {
       stateMachineRef.current.handleFaceDetected({
         boundingBox: face.bounds,
@@ -282,9 +262,6 @@ export default function CheckInScreen() {
     }
   }, [livenessState, canVerifyManually, verifyCapturedFace]);
 
-  /**
-   * Reset pipeline on user retry
-   */
   const handleRetry = useCallback(() => {
     isProcessingRef.current = false;
     hasVerifiedRef.current = false;
@@ -301,7 +278,7 @@ export default function CheckInScreen() {
   if (cameraPermission === undefined) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#4F46E5" />
+        <ActivityIndicator size="large" color="#094cb2" />
       </View>
     );
   }
@@ -311,7 +288,7 @@ export default function CheckInScreen() {
       <View style={styles.container}>
         <View style={styles.content}>
           <View style={styles.iconCircle}>
-            <Ionicons name="warning-outline" size={48} color="#EF4444" />
+            <Ionicons name="warning-outline" size={48} color="#ba1a1a" />
           </View>
           <Text style={styles.title}>Camera Permission Required</Text>
           <Text style={styles.message}>Camera access is mandatory to securely check into this class.</Text>
@@ -325,108 +302,120 @@ export default function CheckInScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header Info Area */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Session Check-In</Text>
-        <Text style={styles.subtitle}>Ensure your face is clearly visible and you are physically in the classroom.</Text>
-      </View>
-
-      {/* Status Banner */}
-      <View style={[
-        styles.statusBox,
-        statusState === 'loading' && styles.statusLoading,
-        statusState === 'ready' && styles.statusReady,
-        statusState === 'error' && styles.statusError,
-      ]}>
-        <Ionicons
-          name={statusState === 'ready' ? "checkmark-circle" : (statusState === 'error' ? "alert-circle" : "sync")}
-          size={20}
-          color={statusState === 'ready' ? "#10B981" : (statusState === 'error' ? "#EF4444" : "#4F46E5")}
-          style={styles.statusIcon}
-        />
-        <Text style={[
-          styles.statusText,
-          statusState === 'loading' && styles.statusTextLoading,
-          statusState === 'ready' && styles.statusTextReady,
-          statusState === 'error' && styles.statusTextError,
-        ]}>{statusText}</Text>
-      </View>
-
-      {/* Camera View & Face Bounding Box Overlay */}
-      <View style={styles.cameraWrapper}>
-        <View
-          style={[styles.cameraContainer, statusState === 'ready' && styles.cameraReady]}
-          onLayout={(e) => {
-            const { width, height } = e.nativeEvent.layout;
-            setLayoutWidth(width);
-            setLayoutHeight(height);
-          }}
-        >
-          <VisionCameraView
-            style={styles.camera}
-            facing="front"
-            ref={cameraRef}
-            onFacesDetected={handleFacesDetected}
-            runClassifications={true}
-            runLandmarks={true}
-          />
-          <FaceOverlay
-            boundingBox={boundingBox}
-            frameWidth={frameWidth}
-            frameHeight={frameHeight}
-            layoutWidth={layoutWidth}
-            layoutHeight={layoutHeight}
-            isFrontCamera={true}
-            currentState={livenessState}
-            landmarks={landmarks}
-          />
+      {/* TopBar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={20} color="#1b1c1d" />
+        </TouchableOpacity>
+        <View style={styles.topBarTitles}>
+          <Text style={styles.headerTitle}>Face Biometrics</Text>
+          <Text style={styles.headerSubtitle}>ATTENDANCE VERIFICATION</Text>
+        </View>
+        <View style={styles.indicatorContainer}>
+          <View style={styles.activeIndicator} />
         </View>
       </View>
 
-      {/* Actions */}
-      <View style={styles.footer}>
-        {!hasVerifiedRef.current && statusState !== 'error' && canVerifyManually && !loading && (
-          <TouchableOpacity
-            style={[styles.verifyButton, { backgroundColor: '#4F46E5', marginBottom: 12 }]}
-            onPress={() => latestFaceRef.current && verifyCapturedFace(latestFaceRef.current)}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="scan-circle-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.verifyButtonText}>Blink missed? Verify Face Now</Text>
-          </TouchableOpacity>
-        )}
+      <View style={{ flex: 1, justifyContent: 'center' }}>
+        {/* Camera View Circular HUD */}
+        <View style={styles.cameraWrapper}>
+          <View style={styles.cameraRing}>
+            <View
+              style={styles.cameraContainer}
+              onLayout={(e) => {
+                const { width, height } = e.nativeEvent.layout;
+                setLayoutWidth(width);
+                setLayoutHeight(height);
+              }}
+            >
+              <VisionCameraView
+                style={styles.camera}
+                facing="front"
+                ref={cameraRef}
+                onFacesDetected={handleFacesDetected}
+                runClassifications={true}
+                runLandmarks={true}
+              />
+              <FaceOverlay
+                boundingBox={boundingBox}
+                frameWidth={frameWidth}
+                frameHeight={frameHeight}
+                layoutWidth={layoutWidth}
+                layoutHeight={layoutHeight}
+                isFrontCamera={true}
+                currentState={livenessState}
+                landmarks={landmarks}
+              />
+            </View>
+          </View>
+        </View>
 
-        {statusState === 'error' && retryCount < MAX_RETRIES && (
-          <TouchableOpacity
-            style={[styles.verifyButton, styles.buttonRetry]}
-            onPress={handleRetry}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="refresh-outline" size={24} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.verifyButtonText}>
-                  Retry Verification ({MAX_RETRIES - retryCount} left)
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-        )}
+        {/* Status Banner */}
+        <View style={[
+          styles.statusBox,
+          statusState === 'loading' && styles.statusLoading,
+          statusState === 'ready' && styles.statusReady,
+          statusState === 'error' && styles.statusError,
+        ]}>
+          <Ionicons
+            name={statusState === 'ready' ? "scan-outline" : (statusState === 'error' ? "warning-outline" : "sync")}
+            size={16}
+            color={statusState === 'ready' ? "#047857" : (statusState === 'error' ? "#ba1a1a" : "#094cb2")}
+            style={styles.statusIcon}
+          />
+          <Text style={[
+            styles.statusText,
+            statusState === 'loading' && styles.statusTextLoading,
+            statusState === 'ready' && styles.statusTextReady,
+            statusState === 'error' && styles.statusTextError,
+          ]}>{statusText}</Text>
+        </View>
 
-        {statusState === 'error' && (
-          <TouchableOpacity
-            style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
-            onPress={() => navigation.navigate('FaceRegistration' as never)}
-            activeOpacity={0.7}
-          >
-            <Text style={{ color: '#4F46E5', fontSize: 13, fontWeight: '600' }}>
-              Having trouble? <Text style={{ textDecorationLine: 'underline' }}>Re-register Face Biometrics</Text>
-            </Text>
-          </TouchableOpacity>
-        )}
+        {/* Actions */}
+        <View style={styles.footer}>
+          {!hasVerifiedRef.current && statusState !== 'error' && canVerifyManually && !loading && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, { marginBottom: 12 }]}
+              onPress={() => latestFaceRef.current && verifyCapturedFace(latestFaceRef.current)}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="scan-circle-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.primaryBtnText}>Blink missed? Verify Face Now</Text>
+            </TouchableOpacity>
+          )}
+
+          {statusState === 'error' && retryCount < MAX_RETRIES && (
+            <TouchableOpacity
+              style={[styles.primaryBtn, styles.buttonRetry]}
+              onPress={handleRetry}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="refresh-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryBtnText}>
+                    Retry Verification ({MAX_RETRIES - retryCount} left)
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {statusState === 'error' && (
+            <TouchableOpacity
+              style={{ marginTop: 14, alignItems: 'center', paddingVertical: 4 }}
+              onPress={() => navigation.navigate('FaceRegistration' as never)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ color: '#094cb2', fontSize: 13, fontWeight: 'bold' }}>
+                Having trouble? <Text style={{ textDecorationLine: 'underline' }}>Re-register Face Biometrics</Text>
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Success Modal */}
@@ -438,7 +427,7 @@ export default function CheckInScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalIconContainer}>
-              <Ionicons name="checkmark-circle" size={72} color="#10B981" />
+              <Ionicons name="checkmark-circle" size={64} color="#10b981" />
             </View>
             <Text style={styles.modalTitle}>Check-In Verified!</Text>
             <Text style={styles.modalMessage}>
@@ -454,7 +443,7 @@ export default function CheckInScreen() {
                 navigation.goBack();
               }}
             >
-              <Text style={styles.modalButtonText}>Awesome</Text>
+              <Text style={styles.modalButtonText}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -466,13 +455,156 @@ export default function CheckInScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f0f2f5',
   },
   centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f0f2f5',
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(195, 198, 213, 0.3)',
+    zIndex: 10,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#f5f3f4',
+    borderWidth: 1,
+    borderColor: 'rgba(195, 198, 213, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topBarTitles: {
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
+    letterSpacing: -0.5,
+  },
+  headerSubtitle: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: 'rgba(67, 70, 83, 0.8)',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  indicatorContainer: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#094cb2',
+    borderWidth: 2,
+    borderColor: '#d9e2ff',
+  },
+  cameraWrapper: {
+    alignItems: 'center',
+    marginVertical: 40,
+  },
+  cameraRing: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: '#b1c5ff',
+    padding: 6,
+    shadowColor: '#3366cc',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  cameraContainer: {
+    flex: 1,
+    borderRadius: 110,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 2,
+    borderColor: '#ffffff',
+    position: 'relative',
+  },
+  camera: {
+    ...StyleSheet.absoluteFill,
+  },
+  statusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 32,
+    marginBottom: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  statusIcon: {
+    marginRight: 6,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  statusLoading: {
+    backgroundColor: '#e7ebff',
+    borderColor: '#b1c5ff',
+  },
+  statusTextLoading: {
+    color: '#094cb2',
+  },
+  statusReady: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+  },
+  statusTextReady: {
+    color: '#047857',
+  },
+  statusError: {
+    backgroundColor: '#ffdad6',
+    borderColor: '#ffb4ab',
+  },
+  statusTextError: {
+    color: '#93000a',
+  },
+  footer: {
+    paddingHorizontal: 24,
+  },
+  primaryBtn: {
+    backgroundColor: '#3366cc',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    shadowColor: '#3366cc',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  buttonRetry: {
+    backgroundColor: '#ba1a1a',
+    shadowColor: '#ba1a1a',
+  },
+  primaryBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   content: {
     flex: 1,
@@ -481,156 +613,52 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   iconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: '#FEF2F2',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#ffdad6',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
-  },
-  header: {
-    padding: 24,
-    paddingBottom: 10,
-    alignItems: 'center',
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginBottom: 8,
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 20,
-  },
-  statusBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 24,
-    marginBottom: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  statusIcon: {
-    marginRight: 8,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  statusLoading: {
-    backgroundColor: '#EEF2FF',
-    borderColor: '#C7D2FE',
-  },
-  statusTextLoading: {
-    color: '#4F46E5',
-  },
-  statusReady: {
-    backgroundColor: '#ECFDF5',
-    borderColor: '#A7F3D0',
-  },
-  statusTextReady: {
-    color: '#065F46',
-  },
-  statusError: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  statusTextError: {
-    color: '#991B1B',
-  },
-  cameraWrapper: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  cameraContainer: {
-    width: 280,
-    height: 380,
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 3,
-    borderColor: '#E5E7EB',
-    position: 'relative',
-    backgroundColor: '#000',
-  },
-  cameraReady: {
-    borderColor: '#10B981',
-  },
-  camera: {
-    ...StyleSheet.absoluteFill,
-  },
-  footer: {
-    padding: 24,
-    paddingBottom: 36,
-  },
-  verifyButton: {
-    backgroundColor: '#4F46E5',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 16,
-    shadowColor: '#4F46E5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  buttonRetry: {
-    backgroundColor: '#EF4444',
-    shadowColor: '#EF4444',
-  },
-  verifyButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  buttonDisabled: {
-    backgroundColor: '#9CA3AF',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
   message: {
-    fontSize: 15,
-    color: '#4B5563',
+    fontSize: 14,
+    color: '#434653',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   button: {
-    backgroundColor: '#4F46E5',
+    backgroundColor: '#3366cc',
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
     padding: 32,
     alignItems: 'center',
     width: '100%',
-    maxWidth: 340,
+    maxWidth: 320,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
@@ -641,21 +669,21 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111827',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1b1c1d',
     marginBottom: 12,
     textAlign: 'center',
   },
   modalMessage: {
-    fontSize: 15,
-    color: '#4B5563',
+    fontSize: 13,
+    color: '#434653',
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 20,
     marginBottom: 24,
   },
   modalButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#3366cc',
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,
@@ -663,8 +691,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

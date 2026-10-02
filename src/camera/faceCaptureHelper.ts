@@ -20,7 +20,7 @@ export interface CaptureCapableRef {
 
 /**
  * Captures a real photo via VisionCamera, crops to face bounds with square geometry and front-camera mirroring,
- * applies canonical RGB float normalization, and extracts real 192D MobileFaceNet embedding and 48D depth vector.
+ * applies canonical RGB float normalization, and extracts real 512D MobileFaceNet embedding and 48D depth vector.
  */
 export async function captureAndProcessFace(
   cameraRef: RefObject<CaptureCapableRef | null>,
@@ -29,6 +29,28 @@ export async function captureAndProcessFace(
 ): Promise<FaceCaptureResult> {
   if (!cameraRef.current) {
     throw new Error('Camera reference is not initialized');
+  }
+
+  // 0. Strict Entry Validation (Fail Fast) before capturing photo
+  if (!face?.bounds) {
+    throw new Error('No face detected in the frame. Please look at the camera.');
+  }
+  if (face.bounds.width < 100 || face.bounds.height < 100) {
+    throw new Error('Face is too far away. Please move the phone closer.');
+  }
+  
+  // Validate Head Tilt (Roll Angle)
+  const faceData: any = face;
+  if (typeof faceData.rollAngle === 'number' && (faceData.rollAngle > 10 || faceData.rollAngle < -10)) {
+    throw new Error('Please hold the phone straight.');
+  } else if (face.landmarks && face.landmarks.LEFT_EYE && face.landmarks.RIGHT_EYE) {
+    // Fallback: Manually calculate roll angle using eye landmarks if rollAngle prop is missing
+    const dy = face.landmarks.RIGHT_EYE.y - face.landmarks.LEFT_EYE.y;
+    const dx = face.landmarks.RIGHT_EYE.x - face.landmarks.LEFT_EYE.x;
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (angle > 10 || angle < -10) {
+      throw new Error('Please hold the phone straight.');
+    }
   }
 
   let img: Image;
@@ -64,44 +86,58 @@ export async function captureAndProcessFace(
   const photoH = img.height;
 
   // 2. Compute crop bounds scaled to photo resolution with front camera mirroring
-  let startX = 0;
-  let startY = 0;
-  let endX = photoW;
-  let endY = photoH;
+  // Since we already strictly validated face.bounds exists, we can safely compute.
+  const frameW = face.frameWidth || photoW;
+  const frameH = face.frameHeight || photoH;
 
-  if (face?.bounds && face.bounds.width > 10 && face.bounds.height > 10) {
-    const frameW = face.frameWidth || photoW;
-    const frameH = face.frameHeight || photoH;
+  const scaleX = photoW / frameW;
+  const scaleY = photoH / frameH;
 
-    const scaleX = photoW / frameW;
-    const scaleY = photoH / frameH;
+  // Front camera photos on Android (HybridPhoto.toImage) are horizontally mirrored.
+  // MLKit face.bounds.x is in unmirrored sensor space, so mirror it when isFrontCamera is true.
+  const rawX = isFrontCamera
+    ? photoW - (face.bounds.x * scaleX + face.bounds.width * scaleX)
+    : face.bounds.x * scaleX;
+  const rawY = face.bounds.y * scaleY;
+  const rawW = face.bounds.width * scaleX;
+  const rawH = face.bounds.height * scaleY;
 
-    // Front camera photos on Android (HybridPhoto.toImage) are horizontally mirrored.
-    // MLKit face.bounds.x is in unmirrored sensor space, so mirror it when isFrontCamera is true.
-    const rawX = isFrontCamera
-      ? photoW - (face.bounds.x * scaleX + face.bounds.width * scaleX)
-      : face.bounds.x * scaleX;
-    const rawY = face.bounds.y * scaleY;
-    const rawW = face.bounds.width * scaleX;
-    const rawH = face.bounds.height * scaleY;
+  const centerX = rawX + rawW / 2;
+  const centerY = rawY + rawH / 2;
 
-    // Use a square bounding box centered on the face with 20% margin to prevent non-uniform aspect distortion
-    const centerX = rawX + rawW / 2;
-    const centerY = rawY + rawH / 2;
-    const side = Math.max(rawW, rawH) * 1.20;
+  // Determine the ideal square side with a 20% margin
+  let side = Math.max(rawW, rawH) * 1.20;
+  // Ensure the square side doesn't exceed the shortest image dimension
+  side = Math.min(side, photoW, photoH);
 
-    startX = Math.max(0, Math.floor(centerX - side / 2));
-    startY = Math.max(0, Math.floor(centerY - side / 2));
-    endX = Math.min(photoW, Math.ceil(centerX + side / 2));
-    endY = Math.min(photoH, Math.ceil(centerY + side / 2));
-  } else {
-    // Center square crop if no explicit bounds
-    const side = Math.min(photoW, photoH);
-    startX = Math.floor((photoW - side) / 2);
-    startY = Math.floor((photoH - side) / 2);
-    endX = startX + side;
-    endY = startY + side;
+  // Calculate initial start/end points
+  let startX = Math.floor(centerX - side / 2);
+  let startY = Math.floor(centerY - side / 2);
+  let endX = Math.floor(startX + side);
+  let endY = Math.floor(startY + side);
+
+  // 3. Shift the square if it bleeds off the edges (maintains 1:1 aspect ratio)
+  if (startX < 0) {
+    endX -= startX; // Push right
+    startX = 0;
+  } else if (endX > photoW) {
+    startX -= (endX - photoW); // Push left
+    endX = photoW;
   }
+
+  if (startY < 0) {
+    endY -= startY; // Push down
+    startY = 0;
+  } else if (endY > photoH) {
+    startY -= (endY - photoH); // Push up
+    endY = photoH;
+  }
+
+  // Final safety clamp to absolute bounds
+  startX = Math.max(0, startX);
+  startY = Math.max(0, startY);
+  endX = Math.min(photoW, endX);
+  endY = Math.min(photoH, endY);
 
   const cropW = Math.max(1, endX - startX);
   const cropH = Math.max(1, endY - startY);
@@ -132,7 +168,7 @@ export async function captureAndProcessFace(
     normalizedRgb[i] = (rgb[i] - 127.5) / 128.0;
   }
 
-  // 6. Extract real 192D MobileFaceNet embedding
+  // 6. Extract real 512D MobileFaceNet embedding
   const embedding = await generateFaceEmbedding(normalizedRgb);
 
   // 7. Extract real 48D depth & topology features (using luminance derived from natural RGB)
