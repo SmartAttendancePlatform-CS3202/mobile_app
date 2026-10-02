@@ -154,15 +154,6 @@ export default function TimetableScreen() {
       {/* Top Header */}
       <View style={styles.topHeader}>
         <Text style={styles.headerTitle}>Timetable</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.semPill}>
-            <Text style={styles.semPillText}>Sem 1</Text>
-            <Ionicons name="chevron-down" size={14} color="#434653" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.searchButton}>
-            <Ionicons name="search" size={16} color="#434653" />
-          </TouchableOpacity>
-        </View>
       </View>
 
       {/* Warning Notice if Face Not Registered */}
@@ -192,10 +183,6 @@ export default function TimetableScreen() {
               <View style={styles.facultyBadge}>
                 <Ionicons name="school" size={14} color="#094cb2" style={{ marginRight: 4 }} />
                 <Text style={styles.facultyBadgeText}>{academicInfo.faculty}</Text>
-              </View>
-              <View style={styles.activeTermBadge}>
-                <View style={styles.activeTermDot} />
-                <Text style={styles.activeTermText}>Active Term</Text>
               </View>
             </View>
             
@@ -319,12 +306,6 @@ export default function TimetableScreen() {
                     </View>
                   </View>
 
-                  {item.isActive && (
-                    <View style={styles.liveBadge}>
-                      <View style={styles.livePulseDot} />
-                      <Text style={styles.liveBadgeText}>LIVE</Text>
-                    </View>
-                  )}
                 </View>
 
                 {/* Course Name */}
@@ -388,7 +369,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 40,
     paddingBottom: 12,
     backgroundColor: 'rgba(250, 249, 250, 0.9)',
     borderBottomWidth: 1,

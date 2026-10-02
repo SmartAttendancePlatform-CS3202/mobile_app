@@ -36,7 +36,21 @@ export default function LocationCheckScreen() {
 
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [venue, setVenue] = useState<TargetVenue>(DEFAULT_VENUE);
+  const [venue, setVenue] = useState<TargetVenue>(() => {
+    if (sessionParam?.geofence) {
+      return {
+        name: sessionParam.venue || sessionParam.courseName || DEFAULT_VENUE.name,
+        building: 'Campus Lecture Venue',
+        latitude: sessionParam.geofence.latitude,
+        longitude: sessionParam.geofence.longitude,
+        radiusMeters: sessionParam.geofence.radiusMeters || sessionParam.geofence.radius_meters || DEFAULT_GEOFENCE_RADIUS_METERS,
+      };
+    }
+    return {
+      ...DEFAULT_VENUE,
+      name: sessionParam?.venue || DEFAULT_VENUE.name,
+    };
+  });
   const [distance, setDistance] = useState<number | null>(null);
   const [inRange, setInRange] = useState(false);
   const [accuracyOk, setAccuracyOk] = useState(true);
@@ -45,10 +59,18 @@ export default function LocationCheckScreen() {
   const [statusText, setStatusText] = useState('Initializing location...');
 
   const watcherRef = useRef<Location.LocationSubscription | null>(null);
+  const venueRef = useRef<TargetVenue>(venue);
+
+  useEffect(() => {
+    venueRef.current = venue;
+    if (location) {
+      evaluateLocation(location, venue);
+    }
+  }, [venue]);
 
   useEffect(() => {
     (async () => {
-      let resolvedVenue: TargetVenue = { ...DEFAULT_VENUE };
+      let resolvedVenue: TargetVenue = { ...venueRef.current };
 
       if (sessionParam?.venue_id) {
         try {
@@ -71,7 +93,7 @@ export default function LocationCheckScreen() {
           building: 'Campus Lecture Venue',
           latitude: sessionParam.geofence.latitude,
           longitude: sessionParam.geofence.longitude,
-          radiusMeters: DEFAULT_GEOFENCE_RADIUS_METERS,
+          radiusMeters: sessionParam.geofence.radiusMeters || sessionParam.geofence.radius_meters || DEFAULT_GEOFENCE_RADIUS_METERS,
         };
       }
 
@@ -84,7 +106,7 @@ export default function LocationCheckScreen() {
             building: vg.building || resolvedVenue.building,
             latitude: vg.latitude || resolvedVenue.latitude,
             longitude: vg.longitude || resolvedVenue.longitude,
-            radiusMeters: vg.radius_meters || DEFAULT_GEOFENCE_RADIUS_METERS,
+            radiusMeters: vg.radius_meters || vg.radiusMeters || resolvedVenue.radiusMeters,
           };
         }
       } catch (e) {
@@ -137,14 +159,14 @@ export default function LocationCheckScreen() {
           distanceInterval: 1,
         },
         (newLoc) => {
-          evaluateLocation(newLoc, venue);
+          evaluateLocation(newLoc, venueRef.current);
         }
       );
       watcherRef.current = sub;
     } catch (err) {
       setStatusText('Failed to stream GPS location');
     }
-  }, [evaluateLocation, venue]);
+  }, [evaluateLocation]);
 
   useEffect(() => {
     (async () => {

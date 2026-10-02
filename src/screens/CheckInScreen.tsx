@@ -105,7 +105,7 @@ export default function CheckInScreen() {
         console.log('[CheckInScreen] Active window check note:', winErr);
       }
 
-      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding);
+      const faceCheckRes = await api.checkInWithFace(sessionId, activeWindowId, lat, lng, captured.embedding, captured.depthFeatures);
 
       if (!faceCheckRes.success || !faceCheckRes.is_match) {
         if (faceCheckRes.requires_re_registration) {

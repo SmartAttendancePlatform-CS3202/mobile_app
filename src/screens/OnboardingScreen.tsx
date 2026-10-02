@@ -23,6 +23,17 @@ interface OnboardingScreenProps {
   onSuccess: () => void;
 }
 
+/**
+ * Computes cosine similarity between two unit-normalized embeddings.
+ */
+function computeCosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+  }
+  return dot;
+}
+
 export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const [loading, setLoading] = useState(false);
@@ -43,6 +54,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   const [poseDirection, setPoseDirection] = useState<GuidedPose | undefined>(undefined);
   const [canStartManually, setCanStartManually] = useState<boolean>(false);
   const [eyeOpenPct, setEyeOpenPct] = useState<number | null>(null);
+  const [shutterFlash, setShutterFlash] = useState<boolean>(false);
 
   const cameraRef = useRef<VisionCameraRef>(null);
   const stateMachineRef = useRef<LivenessStateMachine>(new LivenessStateMachine({ timeoutMs: 60000 }));
@@ -58,9 +70,12 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   const isCapturingRef = useRef<boolean>(false);
   const capturedEmbeddingsRef = useRef<Float32Array[]>([]);
   const depthFeaturesRef = useRef<number[]>([]);
+  const depthFeaturesListRef = useRef<{ depth: number[]; embedding: Float32Array }[]>([]);
   const isBlinkVerifiedRef = useRef<boolean>(false);
   const isRegistrationCompleteRef = useRef<boolean>(false);
   const faceDetectedStartTimeRef = useRef<number | null>(null);
+  const faceLostTimestampRef = useRef<number | null>(null);
+  const lastCaptureTimeRef = useRef<number>(0);
 
   // Subscribe to state machine transitions
   useEffect(() => {
@@ -73,7 +88,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   }, []);
 
   /**
-   * Advances pipeline to Pose 1 (CENTER) of the 5-angle sequence
+   * Advances pipeline to Frame 1 (CENTER) of the multi-frame frontal sequence
    */
   const startPoseSequence = useCallback(() => {
     if (isBlinkVerifiedRef.current || isRegistrationCompleteRef.current) return;
@@ -103,18 +118,28 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
   const captureCurrentPose = useCallback(async (face: Face, targetPose: GuidedPose, poseIndex: number) => {
     if (isCapturingRef.current || isRegistrationCompleteRef.current) return;
     isCapturingRef.current = true;
-    setLoading(true);
+    lastCaptureTimeRef.current = Date.now();
+
+    const isFinalFrame = (poseIndex + 1) >= POSE_SEQUENCE.length;
+    if (isFinalFrame) {
+      setLoading(true);
+    }
+
+    // Trigger subtle non-blocking shutter flash
+    setShutterFlash(true);
+    setTimeout(() => {
+      setShutterFlash(false);
+    }, 120);
 
     try {
-      setPoseInstruction(`Capturing ${targetPose} pose... hold still`);
+      setPoseInstruction(`Capturing frame ${poseIndex + 1} of 5... hold still`);
       const captured = await captureAndProcessFace(cameraRef, face, true);
 
       capturedEmbeddingsRef.current.push(captured.embedding);
-
-      // Save depth features from the frontal center capture
-      if (targetPose === 'CENTER' && captured.depthFeatures.length === 48) {
-        depthFeaturesRef.current = captured.depthFeatures;
-      }
+      depthFeaturesListRef.current.push({
+        depth: captured.depthFeatures,
+        embedding: captured.embedding,
+      });
 
       const nextIndex = poseIndex + 1;
 
@@ -123,37 +148,60 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
         const nextTarget = POSE_SEQUENCE[nextIndex];
         setPoseDirection(nextTarget.pose);
         setPoseProgress({ current: nextIndex, total: POSE_SEQUENCE.length, poseName: nextTarget.pose });
-        setPoseInstruction(nextTarget.instruction);
+        setPoseInstruction('Hold still for next capture...');
       } else {
-        // All 5 poses captured successfully!
+        // All 5 frames captured successfully!
         isRegistrationCompleteRef.current = true;
         stateMachineRef.current.handleAllPosesCaptured({ poseCount: capturedEmbeddingsRef.current.length });
         setPoseProgress({ current: 5, total: 5, poseName: 'COMPLETE' });
-        setPoseInstruction('Computing multi-dimensional centroid biometric profile...');
+        setPoseInstruction('Analyzing biometric quality & calculating centroid...');
 
-        // Step 5: Depth Estimation & Centroid Calculation
-        const finalDepth = depthFeaturesRef.current.length === 48
-          ? depthFeaturesRef.current
-          : captured.depthFeatures;
+        // Intra-burst outlier filtering: check cosine similarity against initial centroid
+        const allEmbeddings = capturedEmbeddingsRef.current;
+        const initialCentroid = computeCentroidEmbedding(allEmbeddings);
+        const pairs = depthFeaturesListRef.current;
+        const qualifiedPairs = pairs.filter(
+          (p) => computeCosineSimilarity(p.embedding, initialCentroid) >= 0.70
+        );
+
+        if (qualifiedPairs.length < 3) {
+          throw new Error('Face capture quality inconsistent due to movement. Please hold still and retry.');
+        }
+
+        const validEmbeddings = qualifiedPairs.map((p) => p.embedding);
+        const centroidEmbedding = computeCentroidEmbedding(validEmbeddings);
+
+        // Select exemplar depth features from frame closest to final centroid
+        let bestPair = qualifiedPairs[0];
+        let bestSim = -1;
+        for (const p of qualifiedPairs) {
+          const sim = computeCosineSimilarity(p.embedding, centroidEmbedding);
+          if (sim > bestSim) {
+            bestSim = sim;
+            bestPair = p;
+          }
+        }
+        const finalDepth = bestPair.depth.length === 48 ? bestPair.depth : captured.depthFeatures;
+
         stateMachineRef.current.handleDepthEstimated({ depthFeatureDim: finalDepth.length });
-
-        const centroidEmbedding = computeCentroidEmbedding(capturedEmbeddingsRef.current);
         stateMachineRef.current.handleEmbeddingReady({ centroid: centroidEmbedding });
         setPoseInstruction('Securing & transmitting profile to database...');
 
-        // Step 6: Transmit to database via attendance microservice API
         const enrollmentMetadata = {
           pose_count: capturedEmbeddingsRef.current.length,
+          valid_pose_count: validEmbeddings.length,
+          outliers_filtered: capturedEmbeddingsRef.current.length - validEmbeddings.length,
           poses: POSE_SEQUENCE.map((p) => p.pose),
           capture_timestamp: new Date().toISOString(),
           lighting_normalized: true,
           depth_dimensions: finalDepth.length,
           version: 3,
+          capture_strategy: 'frontal_interval_500ms',
         };
 
         const regResponse = await api.registerFace(
           centroidEmbedding,
-          capturedEmbeddingsRef.current,
+          validEmbeddings,
           finalDepth,
           enrollmentMetadata,
           0.98
@@ -169,10 +217,11 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
       }
     } catch (err: any) {
       console.error('[OnboardingScreen] Pose capture error:', err);
-      setError(err?.message || 'Error capturing pose. Please retry.');
+      setError(err?.message || 'Error capturing photo. Please retry.');
     } finally {
       setLoading(false);
       isCapturingRef.current = false;
+      lastCaptureTimeRef.current = Date.now();
     }
   }, [onSuccess]);
 
@@ -195,6 +244,19 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
         activeDetectorRef.current.reset();
         stateMachineRef.current.reset();
         setPoseInstruction('Position your face within the frame');
+      } else if (isBlinkVerifiedRef.current && !isRegistrationCompleteRef.current) {
+        setBoundingBox(null);
+        setLandmarks(null);
+        if (faceLostTimestampRef.current === null) {
+          faceLostTimestampRef.current = Date.now();
+          setPoseInstruction('Position your face within the frame');
+        } else if (Date.now() - faceLostTimestampRef.current > 3000) {
+          handleReset();
+          setError('Face lost for more than 3 seconds. Please blink to restart registration.');
+          return;
+        } else {
+          setPoseInstruction('Position your face within the frame');
+        }
       }
       return;
     }
@@ -209,6 +271,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
 
     // Case 3: Exactly 1 face detected
     const face = faces[0];
+    faceLostTimestampRef.current = null;
     if (face.frameWidth && face.frameWidth > 0) setFrameWidth(face.frameWidth);
     if (face.frameHeight && face.frameHeight > 0) setFrameHeight(face.frameHeight);
 
@@ -276,7 +339,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
         });
 
         if (blinkResult.blinkDetected) {
-          setPoseInstruction('Blink confirmed! Starting 5-angle registration...');
+          setPoseInstruction('Blink confirmed! Starting multi-frame capture...');
           startPoseSequence();
           return;
         }
@@ -292,7 +355,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
       return;
     }
 
-    // Step 2: Multi-Pose Angle Evaluation (Center, Left, Right, Up, Down)
+    // Step 2: Frontal Multi-Frame Evaluation (5x Center with 500ms Interval)
     const currentPoseIndex = poseGuideRef.current.getCurrentPoseIndex();
     const currentTarget = poseGuideRef.current.getCurrentTarget();
 
@@ -304,9 +367,15 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
     const evalResult = poseGuideRef.current.evaluate(face.yawAngle, face.pitchAngle);
 
     if (evalResult.isQualified) {
-      captureCurrentPose(face, currentTarget.pose, currentPoseIndex);
+      const now = Date.now();
+      if (now - lastCaptureTimeRef.current >= 500) {
+        lastCaptureTimeRef.current = now;
+        captureCurrentPose(face, currentTarget.pose, currentPoseIndex);
+      } else {
+        setPoseInstruction('Hold still for next capture...');
+      }
     } else {
-      setPoseInstruction(currentTarget.instruction);
+      setPoseInstruction(evalResult.stableFrameCount > 0 ? 'Hold still...' : 'Look straight at the camera');
     }
   }, [livenessState, canStartManually, startPoseSequence, captureCurrentPose]);
 
@@ -318,10 +387,14 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
     isRegistrationCompleteRef.current = false;
     isBlinkVerifiedRef.current = false;
     faceDetectedStartTimeRef.current = null;
+    faceLostTimestampRef.current = null;
+    lastCaptureTimeRef.current = 0;
+    setShutterFlash(false);
     setCanStartManually(false);
     setEyeOpenPct(null);
     capturedEmbeddingsRef.current = [];
     depthFeaturesRef.current = [];
+    depthFeaturesListRef.current = [];
     activeDetectorRef.current.reset();
     stateMachineRef.current.reset();
     poseGuideRef.current = new PoseGuide(3);
@@ -374,6 +447,9 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
             runClassifications={true}
             runLandmarks={true}
           />
+          {shutterFlash && (
+            <View style={styles.shutterOverlay} pointerEvents="none" />
+          )}
           <FaceOverlay
             boundingBox={boundingBox}
             frameWidth={frameWidth}
@@ -418,10 +494,10 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
               <Ionicons name="eye-outline" size={20} color="#4F46E5" style={{ marginRight: 8 }} />
               <Text style={styles.guideStatusText}>
                 {isBlinkVerifiedRef.current
-                  ? `Pose ${(poseProgress?.current ?? 0) + 1} of 5: Follow instructions above`
+                  ? `Frame ${(poseProgress?.current ?? 0) + 1} of 5: Follow instructions above`
                   : eyeOpenPct !== null
                   ? `Eyes open (${eyeOpenPct}%). Blink to begin registration`
-                  : 'Blink naturally to begin 5-angle registration'}
+                  : 'Blink naturally to begin registration'}
               </Text>
             </View>
 
@@ -432,7 +508,7 @@ export default function OnboardingScreen({ onSuccess }: OnboardingScreenProps) {
                 activeOpacity={0.8}
               >
                 <Ionicons name="play-circle-outline" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-                <Text style={styles.manualStartButtonText}>Blink missed? Tap to begin 5-angle capture</Text>
+                <Text style={styles.manualStartButtonText}>Blink missed? Tap to begin capture</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -507,6 +583,15 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 10 },
     position: 'relative',
+  },
+  shutterOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.45)',
+    zIndex: 50,
   },
   camera: {
     flex: 1,

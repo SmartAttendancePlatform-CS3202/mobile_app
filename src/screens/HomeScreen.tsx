@@ -180,12 +180,7 @@ export default function HomeScreen() {
                     )}
                   </View>
 
-                  {session.isActive ? (
-                    <View style={styles.activeBadge}>
-                      <View style={styles.activeDot} />
-                      <Text style={styles.activeText}>Live</Text>
-                    </View>
-                  ) : (
+                  {!session.isActive && (
                     <Text style={styles.dayTag}>{session.day}</Text>
                   )}
                 </View>
@@ -277,7 +272,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingHorizontal: 24,
-    paddingTop: 12,
+    paddingTop: 36,
   },
   pageHeader: {
     borderBottomWidth: 1,

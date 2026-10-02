@@ -33,6 +33,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "dev": "npm start",
     "start": "REACT_NATIVE_PACKAGER_HOSTNAME=localhost expo start",
     "android": "export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-17-temurin-jdk}; export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}; export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}; export PATH=$JAVA_HOME/bin:$PATH; adb reverse tcp:8081 tcp:8081 2>/dev/null; adb reverse tcp:8000 tcp:8000 2>/dev/null; REACT_NATIVE_PACKAGER_HOSTNAME=localhost expo run:android",
     "android:release": "export JAVA_HOME=${JAVA_HOME:-/usr/lib/jvm/java-17-temurin-jdk}; export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}; export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}; export PATH=$JAVA_HOME/bin:$PATH; expo run:android --variant release",
