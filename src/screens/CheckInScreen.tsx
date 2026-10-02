@@ -38,8 +38,8 @@ export default function CheckInScreen() {
   const [landmarks, setLandmarks] = useState<LandmarkPoint[] | null>(null);
   const [frameWidth, setFrameWidth] = useState<number>(720);
   const [frameHeight, setFrameHeight] = useState<number>(1280);
-  const [layoutWidth, setLayoutWidth] = useState<number>(200);
-  const [layoutHeight, setLayoutHeight] = useState<number>(200);
+  const [layoutWidth, setLayoutWidth] = useState<number>(300);
+  const [layoutHeight, setLayoutHeight] = useState<number>(300);
   const [canVerifyManually, setCanVerifyManually] = useState<boolean>(false);
 
   const cameraRef = useRef<VisionCameraRef>(null);
@@ -520,9 +520,9 @@ const styles = StyleSheet.create({
     marginVertical: 40,
   },
   cameraRing: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
+    width: 312,
+    height: 312,
+    borderRadius: 156,
     backgroundColor: '#b1c5ff',
     padding: 6,
     shadowColor: '#3366cc',
@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
   },
   cameraContainer: {
     flex: 1,
-    borderRadius: 110,
+    borderRadius: 150,
     overflow: 'hidden',
     backgroundColor: '#000',
     borderWidth: 2,
