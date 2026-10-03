@@ -152,7 +152,3 @@ mobile-app/
 ```
 
 ---
-
-## License
-
-This project is part of the **Smart Attendance Platform (CS3202)** repository and is licensed under the [MIT License](LICENSE).
