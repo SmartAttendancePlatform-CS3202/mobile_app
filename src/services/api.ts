@@ -175,7 +175,7 @@ class ApiService {
         return {
           id: data.id,
           name: data.full_name || data.display_name || email,
-          email: data.email || email,
+          email: email || data.email,
           indexNumber: data.student_index_no || undefined,
           nameWithInitials: data.name_with_initials || undefined,
           displayName: data.display_name || undefined,

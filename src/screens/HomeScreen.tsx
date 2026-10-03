@@ -103,7 +103,12 @@ export default function HomeScreen() {
         <View style={styles.greetingSection}>
           <View style={styles.greetingTextContainer}>
             <Text style={styles.welcomeText}>WELCOME BACK,</Text>
-            <Text style={styles.nameText}>{currentStudent.name}</Text>
+            <Text style={styles.nameText}>
+              {currentStudent.name
+                ? currentStudent.name.split(' ')[0].charAt(0).toUpperCase() +
+                  currentStudent.name.split(' ')[0].slice(1)
+                : 'Student'}
+            </Text>
           </View>
           {/* Avatar (Optional as per original code) */}
           <TouchableOpacity 
@@ -111,7 +116,7 @@ export default function HomeScreen() {
             activeOpacity={0.8}
             onPress={() => navigation.navigate('Account')}
           >
-            <Text style={styles.avatarText}>{currentStudent.name ? currentStudent.name.charAt(0) : 'S'}</Text>
+            <Text style={styles.avatarText}>{currentStudent.name ? currentStudent.name.charAt(0).toUpperCase() : 'S'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -307,7 +312,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1b1c1d',
     marginTop: 2,
-    textTransform: 'capitalize',
     letterSpacing: -0.5,
   },
   avatar: {

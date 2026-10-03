@@ -189,17 +189,24 @@ export default function AccountScreen() {
               <View style={styles.avatarWrapper}>
                 <View style={styles.avatarCircle}>
                   <Text style={styles.avatarText}>
-                    {currentStudent.name ? currentStudent.name.charAt(0).toUpperCase() : 'R'}
+                    {currentStudent.name
+                      ? currentStudent.name
+                          .split(' ')
+                          .map(n => n.charAt(0))
+                          .join('')
+                          .substring(0, 2)
+                          .toUpperCase()
+                      : 'R'}
                   </Text>
                 </View>
-                {isFaceRegistered && (
-                  <View style={styles.verifiedCheck} testID="biometrics-verified-badge">
-                    <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                  </View>
-                )}
               </View>
 
-              <Text style={styles.studentName}>{currentStudent.name || currentStudent.displayName || 'Student'}</Text>
+              <Text style={styles.studentName}>
+                {(currentStudent.name || currentStudent.displayName || 'Student')
+                  .split(' ')
+                  .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(' ')}
+              </Text>
               <Text style={styles.studentEmail}>{currentStudent.email}</Text>
 
               <View style={styles.badgeRow}>
