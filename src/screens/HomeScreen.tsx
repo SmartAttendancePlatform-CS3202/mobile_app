@@ -29,8 +29,10 @@ export default function HomeScreen() {
       const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
       todaySessions = todaySessions.map((s: any) => {
-        const [startHour, startMin] = s.startTime.split(':').map(Number);
-        const [endHour, endMin] = s.endTime.split(':').map(Number);
+        const startTimeStr = s.startTime || '08:00';
+        const endTimeStr = s.endTime || '10:00';
+        const [startHour = 8, startMin = 0] = startTimeStr.split(':').map(Number);
+        const [endHour = 10, endMin = 0] = endTimeStr.split(':').map(Number);
         const startTotal = startHour * 60 + startMin;
         const endTotal = endHour * 60 + endMin;
         
@@ -117,6 +119,14 @@ export default function HomeScreen() {
   );
 
   const handleMarkRandomCheck = async (session: any) => {
+    if (session.isEnded) {
+      Alert.alert(
+        'Verification Closed',
+        'Class time has ended. Random verification is closed and no longer available.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
     try {
       setVerifyingSessionId(session.id);
       const targetSessionId = session.lectureSessionId || session.id;
@@ -251,7 +261,7 @@ export default function HomeScreen() {
                       backgroundColor: session.isCheckedIn
                         ? (session.attendanceStatus === 'late' ? '#D97706' : '#10b981')
                         : (session.randomCheckActive
-                            ? '#6366f1'
+                            ? (session.isEnded ? '#737784' : '#6366f1')
                             : (session.initialVerified
                                 ? '#10b981'
                                 : (session.isActive ? '#3366cc' : '#737784'))),
@@ -296,9 +306,15 @@ export default function HomeScreen() {
                     ) : (
                       <>
                         {session.randomCheckActive && (
-                          <View style={styles.randomBadge}>
-                            <Ionicons name="radio" size={12} color="#4F46E5" />
-                            <Text style={styles.randomBadgeText}>Random Check Active</Text>
+                          <View style={[styles.randomBadge, session.isEnded && styles.randomBadgeDisabled]}>
+                            <Ionicons
+                              name={session.isEnded ? "lock-closed" : "radio"}
+                              size={12}
+                              color={session.isEnded ? "#737784" : "#4F46E5"}
+                            />
+                            <Text style={[styles.randomBadgeText, session.isEnded && styles.randomBadgeTextDisabled]}>
+                              {session.isEnded ? 'Random Check Closed' : 'Random Check Active'}
+                            </Text>
                           </View>
                         )}
                         {session.initialVerified && (
@@ -352,22 +368,31 @@ export default function HomeScreen() {
 
                 {/* Random Verification Interactive Prompt (Tick Box) */}
                 {session.randomCheckActive && !session.isCheckedIn && (
-                  <View style={styles.randomNoticeBox}>
+                  <View style={[styles.randomNoticeBox, session.isEnded && styles.randomNoticeBoxDisabled]}>
                     <View style={styles.randomNoticeHeader}>
-                      <Ionicons name="radio" size={16} color="#4F46E5" />
-                      <Text style={styles.randomNoticeTitle}>Random Verification Active</Text>
+                      <Ionicons
+                        name={session.isEnded ? "lock-closed" : "radio"}
+                        size={16}
+                        color={session.isEnded ? "#737784" : "#4F46E5"}
+                      />
+                      <Text style={[styles.randomNoticeTitle, session.isEnded && styles.randomNoticeTitleDisabled]}>
+                        {session.isEnded ? 'Random Verification Closed' : 'Random Verification Active'}
+                      </Text>
                     </View>
-                    <Text style={styles.randomNoticeSubtitle}>
-                      Lecturer launched random verification. Tap the tick below to confirm your presence via GPS (no face scan required).
+                    <Text style={[styles.randomNoticeSubtitle, session.isEnded && styles.randomNoticeSubtitleDisabled]}>
+                      {session.isEnded
+                        ? 'Class time has ended. Random verification is closed and no longer accepted.'
+                        : 'Lecturer launched random verification. Tap the tick below to confirm your presence via GPS (no face scan required).'}
                     </Text>
                     <TouchableOpacity
                       style={[
                         styles.randomTickButton,
+                        session.isEnded && styles.randomTickButtonDisabled,
                         verifyingSessionId === session.id && { opacity: 0.7 },
                       ]}
                       onPress={() => handleMarkRandomCheck(session)}
-                      disabled={verifyingSessionId === session.id}
-                      activeOpacity={0.85}
+                      disabled={verifyingSessionId === session.id || session.isEnded}
+                      activeOpacity={session.isEnded ? 1 : 0.85}
                     >
                       {verifyingSessionId === session.id ? (
                         <>
@@ -376,8 +401,15 @@ export default function HomeScreen() {
                         </>
                       ) : (
                         <>
-                          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
-                          <Text style={styles.randomTickButtonText}>✓ Mark Random Verification</Text>
+                          <Ionicons
+                            name={session.isEnded ? "lock-closed-outline" : "checkmark-circle"}
+                            size={18}
+                            color={session.isEnded ? "#737784" : "#FFFFFF"}
+                            style={{ marginRight: 6 }}
+                          />
+                          <Text style={[styles.randomTickButtonText, session.isEnded && styles.randomTickButtonTextDisabled]}>
+                            {session.isEnded ? 'Mark Random Verification (Class Ended)' : '✓ Mark Random Verification'}
+                          </Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -461,7 +493,9 @@ export default function HomeScreen() {
                 {/* Subtext notice if initial check is done and waiting for random check */}
                 {session.initialVerified && !session.isCheckedIn && !session.randomCheckActive && (
                   <Text style={styles.waitingNoticeText}>
-                    Initial check-in done • Waiting for lecturer random check window
+                    {session.isEnded
+                      ? 'Class time has ended'
+                      : 'Initial check-in done • Waiting for lecturer random check window'}
                   </Text>
                 )}
               </View>
@@ -950,6 +984,33 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: 'bold',
+  },
+  randomBadgeDisabled: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#E5E7EB',
+  },
+  randomBadgeTextDisabled: {
+    color: '#737784',
+  },
+  randomNoticeBoxDisabled: {
+    backgroundColor: '#F8F9FA',
+    borderColor: '#E5E7EB',
+  },
+  randomNoticeTitleDisabled: {
+    color: '#737784',
+  },
+  randomNoticeSubtitleDisabled: {
+    color: '#9CA3AF',
+  },
+  randomTickButtonDisabled: {
+    backgroundColor: '#E5E7EB',
+    borderColor: '#D1D5DB',
+    borderWidth: 1,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  randomTickButtonTextDisabled: {
+    color: '#737784',
   },
   waitingNoticeText: {
     fontSize: 11,

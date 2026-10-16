@@ -1281,25 +1281,26 @@ class ApiService {
           return { success: false, message: 'Student is not authenticated.' };
         }
 
-        // Resolve lecture session
         let lectureSessionId: string | null = null;
         let venueId: string | null = null;
+        let sessionMeta: { scheduled_at?: string; duration_mins?: number } | null = null;
 
         const { data: lsRow } = await supabase
           .from('lecture_sessions')
-          .select('id, venue_id, course_offering_id, scheduled_at')
+          .select('id, venue_id, course_offering_id, scheduled_at, duration_mins')
           .eq('id', sessionId)
           .maybeSingle();
 
         if (lsRow?.id) {
           lectureSessionId = lsRow.id;
           venueId = lsRow.venue_id;
+          sessionMeta = lsRow;
         } else {
           // If sessionId is course_offering_id
           const todayDateStr = new Date().toISOString().split('T')[0];
           const { data: offLs } = await supabase
             .from('lecture_sessions')
-            .select('id, venue_id, course_offering_id, scheduled_at')
+            .select('id, venue_id, course_offering_id, scheduled_at, duration_mins')
             .eq('course_offering_id', sessionId)
             .gte('scheduled_at', `${todayDateStr}T00:00:00Z`)
             .lte('scheduled_at', `${todayDateStr}T23:59:59Z`)
@@ -1310,6 +1311,7 @@ class ApiService {
           if (offLs?.id) {
             lectureSessionId = offLs.id;
             venueId = offLs.venue_id;
+            sessionMeta = offLs;
           }
         }
 
@@ -1318,6 +1320,18 @@ class ApiService {
             success: false,
             message: 'Active lecture session not found for this class.',
           };
+        }
+
+        // Verify that the class time has not ended
+        if (sessionMeta?.scheduled_at) {
+          const durationMins = Number(sessionMeta.duration_mins) || 60;
+          const sessionEndMs = new Date(sessionMeta.scheduled_at).getTime() + durationMins * 60 * 1000;
+          if (Date.now() > sessionEndMs) {
+            return {
+              success: false,
+              message: 'Class time has ended. Random verification is closed.',
+            };
+          }
         }
 
         // Resolve active random_check window
