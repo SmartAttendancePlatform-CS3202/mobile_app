@@ -4,8 +4,8 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabaseClient';
 
 export { SUPABASE_URL, SUPABASE_ANON_KEY };
 
-export const BACKEND_BASE_URL = 
-  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+const rawBackendUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+export const BACKEND_BASE_URL = rawBackendUrl.trim().replace(/\/+$/, '').replace(/\/attendance$/, '');
 
 const apiClient = axios.create({
   baseURL: BACKEND_BASE_URL,

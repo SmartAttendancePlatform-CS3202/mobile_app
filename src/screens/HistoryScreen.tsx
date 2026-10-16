@@ -28,12 +28,12 @@ export default function HistoryScreen() {
     });
   };
 
-  const revalidateHistory = useCallback(async (silent: boolean = false) => {
+  const revalidateHistory = useCallback(async (silent: boolean = false, forceRefresh: boolean = false) => {
     if (!silent) {
       setIsRevalidating(true);
     }
     try {
-      const response = await api.getHistory(user?.id);
+      const response = await api.getHistory(user?.id, forceRefresh);
       if (response.success && response.history) {
         setHistory(sortRecords(response.history));
       }
@@ -52,7 +52,7 @@ export default function HistoryScreen() {
     (async () => {
       try {
         const cached = await api.getCachedHistory(user?.id);
-        if (isMounted && cached && cached.length > 0) {
+        if (isMounted && cached !== null) {
           const validCached = cached.filter((c: any) => {
             const title = formatModuleTitle(c.courseCode, c.courseName, c.course);
             return (
@@ -62,10 +62,8 @@ export default function HistoryScreen() {
               title !== 'Academic Module'
             );
           });
-          if (validCached.length > 0) {
-            setHistory(sortRecords(validCached));
-            setInitialLoading(false);
-          }
+          setHistory(sortRecords(validCached));
+          setInitialLoading(false);
         }
       } catch (err) {
         console.warn('Failed to load initial cached history:', err);
@@ -82,7 +80,7 @@ export default function HistoryScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await revalidateHistory(false);
+    await revalidateHistory(false, true);
     setRefreshing(false);
   };
 

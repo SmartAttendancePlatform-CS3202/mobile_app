@@ -18,7 +18,7 @@ const MAX_RETRIES = 3;
 
 export default function CheckInScreen() {
   const route = useRoute<any>();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const sessionId = route.params?.sessionId;
   const lat = route.params?.lat;
   const lng = route.params?.lng;
@@ -429,18 +429,18 @@ export default function CheckInScreen() {
             <View style={styles.modalIconContainer}>
               <Ionicons name="checkmark-circle" size={64} color="#10b981" />
             </View>
-            <Text style={styles.modalTitle}>Check-In Verified!</Text>
+            <Text style={styles.modalTitle}>Initial Verification Done!</Text>
             <Text style={styles.modalMessage}>
               {confidence !== null
-                ? `Biometric match confirmed against database profile with ${Math.round(confidence * 100)}% similarity confidence.`
-                : 'You have been successfully verified against the database and checked in.'}
+                ? `Biometric & location verified (${Math.round(confidence * 100)}% match). Initial check-in recorded on dashboard.`
+                : 'Initial face and location verification recorded successfully.'}
             </Text>
             <TouchableOpacity
               style={styles.modalButton}
               activeOpacity={0.8}
               onPress={() => {
                 setShowSuccessModal(false);
-                navigation.goBack();
+                navigation.navigate('MainTabs', { screen: 'Dashboard' });
               }}
             >
               <Text style={styles.modalButtonText}>Done</Text>

@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, InteractionManager, Alert, RefreshControl } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, RefreshControl, ActivityIndicator } from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { mockStudent, mockAcademicInfo } from '../services/mockData';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../services/supabaseClient';
 import api from '../services/api';
 import Skeleton from '../components/Skeleton';
 
@@ -14,6 +15,7 @@ export default function HomeScreen() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [verifyingSessionId, setVerifyingSessionId] = useState<string | null>(null);
 
   const loadTodayClasses = useCallback(async () => {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -63,16 +65,90 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      (async () => {
-        setLoading(true);
-        await loadTodayClasses();
-        setLoading(false);
-      })();
-    });
-
-    return () => task.cancel();
+    (async () => {
+      setLoading(true);
+      await loadTodayClasses();
+      setLoading(false);
+    })();
   }, [loadTodayClasses]);
+
+  const loadTodayClassesRef = useRef(loadTodayClasses);
+  useEffect(() => {
+    loadTodayClassesRef.current = loadTodayClasses;
+  }, [loadTodayClasses]);
+
+  // Real-time Supabase subscription for verification windows and attendance records
+  useEffect(() => {
+    const channelName = `realtime_windows_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'verification_windows' },
+        () => {
+          loadTodayClassesRef.current();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_records' },
+        () => {
+          loadTodayClassesRef.current();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    };
+  }, []);
+
+  // Polling every 5s while screen is in focus
+  useFocusEffect(
+    useCallback(() => {
+      loadTodayClasses();
+      const interval = setInterval(() => {
+        loadTodayClasses();
+      }, 5000);
+      return () => clearInterval(interval);
+    }, [loadTodayClasses])
+  );
+
+  const handleMarkRandomCheck = async (session: any) => {
+    try {
+      setVerifyingSessionId(session.id);
+      const targetSessionId = session.lectureSessionId || session.id;
+      const res = await api.submitRandomCheck(targetSessionId, session.randomWindowId);
+      if (res.success) {
+        await loadTodayClasses();
+        const successTitle = res.isFullyMarked ? '✓ Attendance Marked!' : '✓ Random Verification Done!';
+        const successBody = typeof res.message === 'string' && res.message.trim().length > 0
+          ? res.message
+          : 'Random verification recorded successfully.';
+        Alert.alert(
+          successTitle,
+          successBody,
+          [{ text: 'OK' }]
+        );
+      } else {
+        const failBody = typeof res.message === 'string' && res.message.trim().length > 0
+          ? res.message
+          : 'Outside lecture venue geofence. Please ensure you are inside the classroom.';
+        Alert.alert(
+          'Location Check Failed',
+          failBody,
+          [{ text: 'Try Again' }]
+        );
+      }
+    } catch (err: any) {
+      const errMsg = typeof err?.message === 'string' ? err.message : 'Failed to submit random check.';
+      Alert.alert('Verification Error', errMsg);
+    } finally {
+      setVerifyingSessionId(null);
+    }
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -168,7 +244,20 @@ export default function HomeScreen() {
               <View style={[styles.card, session.isActive ? styles.activeCard : styles.inactiveCard]}>
                 
                 {/* Left colored accent bar */}
-                <View style={[styles.leftAccentBar, { backgroundColor: session.isActive ? '#3366cc' : '#737784' }]} />
+                <View
+                  style={[
+                    styles.leftAccentBar,
+                    {
+                      backgroundColor: session.isCheckedIn
+                        ? (session.attendanceStatus === 'late' ? '#D97706' : '#10b981')
+                        : (session.randomCheckActive
+                            ? '#6366f1'
+                            : (session.initialVerified
+                                ? '#10b981'
+                                : (session.isActive ? '#3366cc' : '#737784'))),
+                    },
+                  ]}
+                />
 
                 {/* Card Header / Meta Badges */}
                 <View style={styles.cardHeader}>
@@ -183,9 +272,58 @@ export default function HomeScreen() {
                         <Text style={styles.typeBadgeText}>{session.typeLabel}</Text>
                       </View>
                     )}
+                    {session.isCheckedIn ? (
+                      <View
+                        style={[
+                          styles.checkedInBadge,
+                          session.attendanceStatus === 'late' && styles.lateBadge,
+                        ]}
+                      >
+                        <Ionicons
+                          name={session.attendanceStatus === 'late' ? "time" : "checkmark-circle"}
+                          size={12}
+                          color={session.attendanceStatus === 'late' ? '#92400E' : '#047857'}
+                        />
+                        <Text
+                          style={[
+                            styles.checkedInBadgeText,
+                            session.attendanceStatus === 'late' && styles.lateBadgeText,
+                          ]}
+                        >
+                          {session.attendanceStatus === 'late' ? 'Late' : 'Attended'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        {session.randomCheckActive && (
+                          <View style={styles.randomBadge}>
+                            <Ionicons name="radio" size={12} color="#4F46E5" />
+                            <Text style={styles.randomBadgeText}>Random Check Active</Text>
+                          </View>
+                        )}
+                        {session.initialVerified && (
+                          <View style={styles.initialVerifiedBadge}>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={12}
+                              color="#047857"
+                            />
+                            <Text style={styles.initialVerifiedBadgeText}>
+                              Initial Verified
+                            </Text>
+                          </View>
+                        )}
+                        {!session.randomCheckActive && session.randomCheckCompletedAt && !session.initialVerified && (
+                          <View style={styles.randomVerifiedBadge}>
+                            <Ionicons name="checkmark-circle" size={12} color="#4F46E5" />
+                            <Text style={styles.randomVerifiedBadgeText}>Random Verified</Text>
+                          </View>
+                        )}
+                      </>
+                    )}
                   </View>
 
-                  {!session.isActive && (
+                  {!session.isActive && !session.isCheckedIn && !session.initialVerified && !session.randomCheckActive && (
                     <Text style={styles.dayTag}>{session.day}</Text>
                   )}
                 </View>
@@ -211,16 +349,55 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                 </View>
+
+                {/* Random Verification Interactive Prompt (Tick Box) */}
+                {session.randomCheckActive && !session.isCheckedIn && (
+                  <View style={styles.randomNoticeBox}>
+                    <View style={styles.randomNoticeHeader}>
+                      <Ionicons name="radio" size={16} color="#4F46E5" />
+                      <Text style={styles.randomNoticeTitle}>Random Verification Active</Text>
+                    </View>
+                    <Text style={styles.randomNoticeSubtitle}>
+                      Lecturer launched random verification. Tap the tick below to confirm your presence via GPS (no face scan required).
+                    </Text>
+                    <TouchableOpacity
+                      style={[
+                        styles.randomTickButton,
+                        verifyingSessionId === session.id && { opacity: 0.7 },
+                      ]}
+                      onPress={() => handleMarkRandomCheck(session)}
+                      disabled={verifyingSessionId === session.id}
+                      activeOpacity={0.85}
+                    >
+                      {verifyingSessionId === session.id ? (
+                        <>
+                          <ActivityIndicator size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
+                          <Text style={styles.randomTickButtonText}>Checking GPS Location...</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" style={{ marginRight: 6 }} />
+                          <Text style={styles.randomTickButtonText}>✓ Mark Random Verification</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                )}
                 
-                {/* Check-In Button */}
+                {/* Initial Check-In / Final Attendance Button */}
                 <TouchableOpacity 
                   style={[
                     styles.checkInButton, 
-                    session.isActive 
-                      ? styles.buttonActive 
-                      : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)
+                    session.isCheckedIn
+                      ? (session.attendanceStatus === 'late' ? styles.buttonLate : styles.buttonCheckedIn)
+                      : (session.initialVerified
+                          ? styles.buttonInitialVerified
+                          : (session.isActive 
+                              ? styles.buttonActive 
+                              : (session.isCheckInAllowed ? styles.buttonAllowed : styles.buttonDisabled)))
                   ]}
                   onPress={() => {
+                    if (session.isCheckedIn || session.initialVerified) return;
                     if (!isFaceRegistered) {
                       Alert.alert(
                         'Biometrics Required',
@@ -236,30 +413,57 @@ export default function HomeScreen() {
                       navigation.navigate('LocationCheck', { sessionId: session.id, session });
                     }
                   }}
-                  disabled={!session.isCheckInAllowed}
+                  disabled={session.isCheckedIn || session.initialVerified || !session.isCheckInAllowed}
                 >
                   <Ionicons 
-                    name={session.isActive ? "finger-print-outline" : (session.isCheckInAllowed ? "time-outline" : "lock-closed-outline")} 
+                    name={
+                      session.isCheckedIn
+                        ? (session.attendanceStatus === 'late' ? "time-outline" : "checkmark-circle")
+                        : (session.initialVerified
+                            ? "checkmark-circle-outline"
+                            : (session.isActive ? "finger-print-outline" : (session.isCheckInAllowed ? "time-outline" : "lock-closed-outline")))
+                    } 
                     size={16} 
-                    color={session.isActive ? "#fff" : (session.isCheckInAllowed ? "#094cb2" : "#737784")} 
+                    color={
+                      session.isCheckedIn
+                        ? (session.attendanceStatus === 'late' ? "#92400E" : "#047857")
+                        : (session.initialVerified
+                            ? "#047857"
+                            : (session.isActive ? "#fff" : (session.isCheckInAllowed ? "#094cb2" : "#737784")))
+                    } 
                     style={{ marginRight: 6 }}
                   />
                   <Text style={[
                     styles.checkInButtonText, 
-                    session.isActive 
-                      ? styles.buttonTextActive 
-                      : (session.isCheckInAllowed ? styles.buttonTextAllowed : styles.buttonTextDisabled)
+                    session.isCheckedIn
+                      ? (session.attendanceStatus === 'late' ? styles.buttonTextLate : styles.buttonTextCheckedIn)
+                      : (session.initialVerified
+                          ? styles.buttonTextInitialVerified
+                          : (session.isActive 
+                              ? styles.buttonTextActive 
+                              : (session.isCheckInAllowed ? styles.buttonTextAllowed : styles.buttonTextDisabled)))
                   ]}>
-                    {session.isActive 
-                      ? "Check-In to Live Class" 
-                      : (session.isCheckInAllowed 
-                          ? "Check-In Open Early" 
-                          : (session.isEnded ? "Class Ended" : "View Lecture Details"))}
+                    {session.isCheckedIn
+                      ? (session.attendanceStatus === 'late' ? "⚠ Marked Late" : "✓ Attendance Marked")
+                      : (session.initialVerified
+                          ? "✓ Initial Verification Done"
+                          : (session.isActive 
+                              ? (session.randomCheckCompletedAt ? "Complete Face Check-In" : "Check-In to Live Class") 
+                              : (session.isCheckInAllowed 
+                                  ? "Check-In Open Early" 
+                                  : (session.isEnded ? "Class Ended" : "View Lecture Details"))))}
                   </Text>
-                  {session.isCheckInAllowed && (
+                  {!session.isCheckedIn && !session.initialVerified && session.isCheckInAllowed && (
                     <Ionicons name="arrow-forward" size={16} color={session.isActive ? "#fff" : "#094cb2"} style={{ marginLeft: 6 }} />
                   )}
                 </TouchableOpacity>
+
+                {/* Subtext notice if initial check is done and waiting for random check */}
+                {session.initialVerified && !session.isCheckedIn && !session.randomCheckActive && (
+                  <Text style={styles.waitingNoticeText}>
+                    Initial check-in done • Waiting for lecturer random check window
+                  </Text>
+                )}
               </View>
             </View>
           ))
@@ -598,6 +802,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#faf9fa',
     borderColor: '#e3e2e3',
   },
+  buttonCheckedIn: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+  },
+  buttonLate: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
   checkInButtonText: {
     fontSize: 12,
     fontWeight: 'bold',
@@ -610,5 +822,140 @@ const styles = StyleSheet.create({
   },
   buttonTextDisabled: {
     color: '#737784',
+  },
+  buttonTextCheckedIn: {
+    color: '#047857',
+  },
+  buttonTextLate: {
+    color: '#92400E',
+  },
+  checkedInBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    gap: 4,
+  },
+  lateBadge: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  checkedInBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  lateBadgeText: {
+    color: '#92400E',
+  },
+  initialVerifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    gap: 4,
+  },
+  initialVerifiedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  buttonInitialVerified: {
+    backgroundColor: '#ecfdf5',
+    borderColor: '#a7f3d0',
+  },
+  buttonTextInitialVerified: {
+    color: '#047857',
+  },
+  randomBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 4,
+  },
+  randomBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  randomVerifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 4,
+  },
+  randomVerifiedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  randomNoticeBox: {
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  randomNoticeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  randomNoticeTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#3730A3',
+  },
+  randomNoticeSubtitle: {
+    fontSize: 12,
+    color: '#4338CA',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  randomTickButton: {
+    backgroundColor: '#4F46E5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  randomTickButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+  waitingNoticeText: {
+    fontSize: 11,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 6,
+    fontStyle: 'italic',
   },
 });

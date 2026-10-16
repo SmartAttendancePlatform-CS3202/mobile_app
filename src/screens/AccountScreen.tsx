@@ -37,6 +37,7 @@ export default function AccountScreen() {
   const [totalCredits, setTotalCredits] = useState<number>(0);
   const [modulesLoading, setModulesLoading] = useState<boolean>(false);
   const [syncingModules, setSyncingModules] = useState<boolean>(false);
+  const [clearingCache, setClearingCache] = useState<boolean>(false);
 
   const currentStudent = user;
 
@@ -84,6 +85,35 @@ export default function AccountScreen() {
       Alert.alert('Sync Error', err?.message || 'Failed to sync with database.');
     }
     setSyncingModules(false);
+  };
+
+  const handleClearCachePress = () => {
+    Alert.alert(
+      'Clear Local Cache',
+      'This will clear locally stored attendance history, timetables, and class caches. Fresh data will be retrieved directly from the university database.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear Cache',
+          style: 'destructive',
+          onPress: async () => {
+            setClearingCache(true);
+            try {
+              await api.clearAllAppDataCache();
+              await Promise.all([refreshProfile(), loadModules()]);
+              Alert.alert(
+                'Cache Reset',
+                'Local cache cleared. Fresh data has been synchronized with the database.'
+              );
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to clear local cache.');
+            } finally {
+              setClearingCache(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSignOutPress = () => {
@@ -388,6 +418,39 @@ export default function AccountScreen() {
                   <Text style={styles.actionButtonSecondaryText}>Register Face Biometrics</Text>
                 </TouchableOpacity>
               )}
+            </View>
+
+            {/* 4. Local Cache & Data Storage Section */}
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionIconWrap}>
+                  <Ionicons name="server-outline" size={18} color="#094cb2" />
+                </View>
+                <View>
+                  <Text style={styles.sectionTitle}>Data & Offline Cache</Text>
+                  <Text style={styles.sectionSubtitle}>Local cache and offline synchronization</Text>
+                </View>
+              </View>
+
+              <Text style={styles.cacheNoticeText}>
+                Attendance history and module data are cached locally for offline accessibility. Clearing cache forces an authentic sync directly from the database.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.actionButtonSecondary}
+                onPress={handleClearCachePress}
+                activeOpacity={0.8}
+                disabled={clearingCache}
+              >
+                {clearingCache ? (
+                  <ActivityIndicator size="small" color="#094cb2" style={{ marginRight: 8 }} />
+                ) : (
+                  <Ionicons name="trash-outline" size={16} color="#094cb2" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.actionButtonSecondaryText}>
+                  {clearingCache ? 'Clearing Cache...' : 'Clear Local Cache & Resync'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {/* Subtle Footer Note */}
@@ -907,5 +970,11 @@ const styles = StyleSheet.create({
     color: '#094cb2',
     fontSize: 13,
     fontWeight: '600',
-  }
+  },
+  cacheNoticeText: {
+    fontSize: 13,
+    color: '#434751',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
 });
