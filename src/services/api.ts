@@ -1,9 +1,60 @@
 import apiClient, { BACKEND_BASE_URL } from './apiClient';
 import { supabase } from './supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StudentProfile, ClassSession, EnrolledModule, WeekDay, mockAcademicInfo, AttendanceHistoryItem, mockAttendanceHistory } from './mockData';
+import * as Location from 'expo-location';
+import { StudentProfile, ClassSession, EnrolledModule, WeekDay, mockAcademicInfo, AttendanceHistoryItem } from './mockData';
 import { calculateHaversineDistance } from '../utils/geo';
 import { EMBEDDING_DIM } from '../embedding/faceEmbedding';
+
+/**
+ * Safely normalizes any error object, Pydantic 422 validation array, or nested error response
+ * into a single human-readable string guaranteed never to crash React Native's DialogModule.
+ */
+function extractErrorMessage(errorOrDetail: any, fallback: string = 'An unexpected error occurred'): string {
+  if (!errorOrDetail) return fallback;
+  if (typeof errorOrDetail === 'string') return errorOrDetail;
+
+  // Axios error response object
+  if (errorOrDetail?.isAxiosError || errorOrDetail?.response) {
+    const data = errorOrDetail.response?.data;
+    if (data?.detail) {
+      return extractErrorMessage(data.detail, fallback);
+    }
+    if (data?.message) {
+      return extractErrorMessage(data.message, fallback);
+    }
+    if (typeof errorOrDetail.message === 'string') {
+      return errorOrDetail.message;
+    }
+  }
+
+  // FastAPI / Pydantic validation array: [{ loc: [...], msg: "...", type: "..." }]
+  if (Array.isArray(errorOrDetail)) {
+    const messages = errorOrDetail.map((item) => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') {
+        const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : undefined;
+        const msg = item.msg || item.message || JSON.stringify(item);
+        return field ? `${field}: ${msg}` : msg;
+      }
+      return String(item);
+    });
+    return messages.filter(Boolean).join('\n') || fallback;
+  }
+
+  if (typeof errorOrDetail === 'object') {
+    if (typeof errorOrDetail.message === 'string') return errorOrDetail.message;
+    if (typeof errorOrDetail.msg === 'string') return errorOrDetail.msg;
+    if (typeof errorOrDetail.detail === 'string') return errorOrDetail.detail;
+    try {
+      return JSON.stringify(errorOrDetail);
+    } catch {
+      return fallback;
+    }
+  }
+
+  return String(errorOrDetail);
+}
 
 function mapOfferingToClassSession(offering: any): ClassSession {
   const rawDay = offering.day || 'Monday';
@@ -47,6 +98,38 @@ function mapOfferingToClassSession(offering: any): ClassSession {
   const venueId = offering.venue_id || offering.venue?.id || undefined;
   const credits = offering.course?.credits ?? offering.course_credits ?? undefined;
 
+  let geofence: { latitude: number; longitude: number; radiusMeters: number; radiusInMeters: number } | undefined = undefined;
+  const boundary = offering.venue?.boundary_data || offering.boundary_data;
+  if (boundary && typeof boundary === 'object') {
+    const center = typeof boundary.center === 'object' && boundary.center !== null ? boundary.center : {};
+    let lat = boundary.latitude ?? boundary.lat ?? center.lat ?? center.latitude;
+    let lng = boundary.longitude ?? boundary.lng ?? boundary.lon ?? center.lng ?? center.longitude;
+    const rad = boundary.radius_meters ?? boundary.radius_m ?? boundary.radius ?? 30;
+
+    if ((lat === undefined || lng === undefined) && Array.isArray(boundary.vertices) && boundary.vertices.length > 0) {
+      let sumLat = 0;
+      let sumLng = 0;
+      for (const vertex of boundary.vertices) {
+        if (Array.isArray(vertex) && vertex.length >= 2) {
+          sumLat += Number(vertex[0]);
+          sumLng += Number(vertex[1]);
+        }
+      }
+      lat = sumLat / boundary.vertices.length;
+      lng = sumLng / boundary.vertices.length;
+    }
+
+    if (lat !== undefined && lng !== undefined && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
+      const r = Number(rad) || 30;
+      geofence = {
+        latitude: Number(lat),
+        longitude: Number(lng),
+        radiusMeters: r,
+        radiusInMeters: r,
+      };
+    }
+  }
+
   return {
     id: offering.id,
     courseCode,
@@ -65,6 +148,7 @@ function mapOfferingToClassSession(offering: any): ClassSession {
     credits,
     semester: offering.semester || undefined,
     offeringCode: offering.offering_code || undefined,
+    geofence: geofence as any,
   };
 }
 
@@ -419,7 +503,7 @@ class ApiService {
 
       return {
         success: false,
-        message: error.response?.data?.detail || error.message || 'Face registration failed. Please check your connection.',
+        message: extractErrorMessage(error, 'Face registration failed. Please check your connection.'),
       };
     }
   }
@@ -502,12 +586,152 @@ class ApiService {
       // Sort classes by start time
       classes.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 
+      let resultClasses = classes;
       // Filter by day if requested
       if (day && day !== 'All') {
-        const filtered = classes.filter((c) => c.day?.toLowerCase() === day.toLowerCase());
-        return { success: true, classes: filtered };
+        resultClasses = classes.filter((c) => c.day?.toLowerCase() === day.toLowerCase());
       }
-      return { success: true, classes };
+
+      // --- Enrich with today's attendance status (fail-open) ---
+      try {
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        const studentId = authSession?.user?.id;
+
+        if (studentId && resultClasses.length > 0) {
+          const offeringIds = resultClasses.map((s: any) => s.id).filter(Boolean);
+
+          let attendanceMap = new Map<string, {
+            status: string;
+            firstCheckInAt: string | null;
+            randomCheckCompletedAt: string | null;
+            lectureSessionId?: string | null;
+          }>();
+
+          // 1. Primary: Direct attendance records from Backend microservice
+          try {
+            const attMeRes = await apiClient.get('/attendance/me');
+            if (attMeRes.data && Array.isArray(attMeRes.data)) {
+              for (const rec of attMeRes.data) {
+                const recData = {
+                  status: rec.status,
+                  firstCheckInAt: rec.first_check_in_at || null,
+                  randomCheckCompletedAt: rec.random_check_completed_at || null,
+                  lectureSessionId: rec.lecture_session_id || rec.lecture_session?.id || null,
+                };
+                if (rec.lecture_session?.course_offering_id) {
+                  attendanceMap.set(rec.lecture_session.course_offering_id, recData);
+                }
+                if (rec.course_offering_id) {
+                  attendanceMap.set(rec.course_offering_id, recData);
+                }
+                if (rec.lecture_session_id) {
+                  attendanceMap.set(rec.lecture_session_id, recData);
+                }
+              }
+            }
+          } catch (e) {
+            // Microservice may be offline, fallback to Supabase query below
+          }
+
+          // 2. Resilient Supabase database query (works via RLS)
+          try {
+            const { data: sbRecords, error: sbErr } = await supabase
+              .from('attendance_records')
+              .select(`
+                id, status, first_check_in_at, random_check_completed_at, lecture_session_id,
+                lecture_session:lecture_sessions (
+                  id, course_offering_id, scheduled_at
+                )
+              `)
+              .eq('student_id', studentId);
+
+            if (!sbErr && sbRecords && sbRecords.length > 0) {
+              for (const rec of sbRecords) {
+                const ls = Array.isArray(rec.lecture_session)
+                  ? rec.lecture_session[0]
+                  : rec.lecture_session;
+                const recData = {
+                  status: rec.status,
+                  firstCheckInAt: rec.first_check_in_at || null,
+                  randomCheckCompletedAt: rec.random_check_completed_at || null,
+                  lectureSessionId: rec.lecture_session_id || ls?.id || null,
+                };
+                if (ls?.course_offering_id) {
+                  attendanceMap.set(ls.course_offering_id, recData);
+                }
+                if (rec.lecture_session_id) {
+                  attendanceMap.set(rec.lecture_session_id, recData);
+                }
+              }
+            }
+          } catch (sbErr) {
+            console.log('[getEnrolledClasses] Supabase attendance query note:', sbErr);
+          }
+
+          // 3. Query active random_check windows from Supabase
+          let activeWindowsMap = new Map<string, { id: string; closeAt: string | null; lectureSessionId?: string }>();
+          try {
+            const { data: winData, error: winErr } = await supabase
+              .from('verification_windows')
+              .select(`
+                id, lecture_session_id, window_type, is_active, scheduled_close_at,
+                lecture_session:lecture_sessions ( id, course_offering_id )
+              `)
+              .eq('window_type', 'random_check')
+              .eq('is_active', true);
+
+            if (!winErr && winData && winData.length > 0) {
+              for (const w of winData) {
+                const winInfo = {
+                  id: w.id,
+                  closeAt: w.scheduled_close_at || null,
+                  lectureSessionId: w.lecture_session_id || undefined,
+                };
+                if (w.lecture_session_id) {
+                  activeWindowsMap.set(w.lecture_session_id, winInfo);
+                }
+                const ls = Array.isArray(w.lecture_session) ? w.lecture_session[0] : w.lecture_session;
+                if (ls?.course_offering_id) {
+                  activeWindowsMap.set(ls.course_offering_id, winInfo);
+                }
+              }
+            }
+          } catch (winErr) {
+            console.log('[getEnrolledClasses] Active windows query note:', winErr);
+          }
+
+          // Merge into resultClasses
+          resultClasses = resultClasses.map((s: any) => {
+            const att = attendanceMap.get(s.id) || attendanceMap.get(s.offeringCode) || attendanceMap.get(s.courseCode);
+            const activeWin = activeWindowsMap.get(s.id) || (att?.lectureSessionId ? activeWindowsMap.get(att.lectureSessionId) : undefined);
+            const resolvedLectureSessionId = att?.lectureSessionId || activeWin?.lectureSessionId || undefined;
+            const hasInitialCheckIn = Boolean(att?.firstCheckInAt);
+            const hasRandomCheckCompleted = Boolean(att?.randomCheckCompletedAt);
+            const isFullyCheckedIn = Boolean(
+              att && (att.status === 'present' || att.status === 'late' || (hasInitialCheckIn && hasRandomCheckCompleted))
+            );
+
+            return {
+              ...s,
+              lectureSessionId: resolvedLectureSessionId,
+              isCheckedIn: isFullyCheckedIn,
+              initialVerified: hasInitialCheckIn,
+              initialVerifiedAt: att?.firstCheckInAt || null,
+              randomCheckActive: Boolean(activeWin && !hasRandomCheckCompleted),
+              randomWindowId: activeWin?.id,
+              randomCheckCloseAt: activeWin?.closeAt || null,
+              randomCheckCompletedAt: att?.randomCheckCompletedAt || null,
+              attendanceStatus: (att?.status as any) || (hasInitialCheckIn ? 'initial_verified' : null),
+              checkedInAt: att?.firstCheckInAt || null,
+            };
+          });
+        }
+      } catch (attErr) {
+        console.log('[getEnrolledClasses] Attendance enrichment note:', attErr);
+        // Fail-open: return sessions without attendance data
+      }
+
+      return { success: true, classes: resultClasses };
     }
 
     return { success: false, classes: [], message: 'No enrolled classes found for student.' };
@@ -737,6 +961,7 @@ class ApiService {
       const isMatch = Boolean(resData?.is_match);
       if (isMatch) {
         this.invalidateHistoryCache().catch(() => {});
+        AsyncStorage.removeItem('@enrolled_classes_cache').catch(() => {});
       }
       return {
         success: isMatch,
@@ -747,12 +972,12 @@ class ApiService {
         data: resData,
       };
     } catch (error: any) {
-      const errorDetail = error.response?.data?.detail || error.response?.data?.message;
-      if (error.response?.status === 400 || error.response?.status === 403 || error.response?.status === 409) {
+      const errorDetail = extractErrorMessage(error, 'Face verification rejected by backend database');
+      if (error.response?.status === 400 || error.response?.status === 403 || error.response?.status === 409 || error.response?.status === 422) {
         return {
           success: false,
           is_match: false,
-          message: errorDetail || 'Face verification rejected by backend database',
+          message: errorDetail,
         };
       }
       console.log('Backend attendance service unavailable, attempting resilient Supabase DB verification fallback:', error?.message);
@@ -898,6 +1123,7 @@ class ApiService {
               first_check_in_at: new Date().toISOString(),
             }, { onConflict: 'lecture_session_id,student_id' });
           await this.invalidateHistoryCache(studentId);
+          await AsyncStorage.removeItem('@enrolled_classes_cache').catch(() => {});
         }
       } catch (attErr) {
         console.warn('Supabase attendance record write note:', attErr);
@@ -945,7 +1171,7 @@ class ApiService {
           : `Outside geofence (${Math.round(data?.distance_meters || 0)}m away, must be <= 30m)`,
       };
     } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Location verification failed';
+      const msg = extractErrorMessage(error, 'Location verification failed');
       return {
         success: false,
         inside: false,
@@ -961,6 +1187,275 @@ class ApiService {
       data: res,
       message: res.message,
     };
+  }
+
+  async submitRandomCheck(
+    sessionId: string,
+    windowId?: string,
+    lat?: number,
+    lng?: number
+  ): Promise<{
+    success: boolean;
+    attendanceStatus?: string;
+    isFullyMarked?: boolean;
+    message: string;
+    distanceMeters?: number;
+  }> {
+    try {
+      let latitude = lat;
+      let longitude = lng;
+
+      if (latitude === undefined || longitude === undefined) {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          return {
+            success: false,
+            message: 'Location permission denied. Please allow GPS access to verify presence in the lecture hall.',
+          };
+        }
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+        latitude = loc.coords.latitude;
+        longitude = loc.coords.longitude;
+      }
+
+      const cleanWindowId =
+        windowId && typeof windowId === 'string' && windowId.trim().length > 0
+          ? windowId.trim()
+          : undefined;
+
+      const body: any = {
+        lecture_session_id: sessionId,
+        latitude,
+        longitude,
+      };
+      if (cleanWindowId) {
+        body.verification_window_id = cleanWindowId;
+      }
+
+      // 1. Primary: Verify via Backend API microservice
+      try {
+        const response = await apiClient.post('/attendance/checkin/random-check', body);
+        const data = response.data;
+        if (data?.status === 'success') {
+          await AsyncStorage.removeItem('@enrolled_classes_cache').catch(() => {});
+          try {
+            const { data: { session: authSession } } = await supabase.auth.getSession();
+            if (authSession?.user?.id) {
+              await this.invalidateHistoryCache(authSession.user.id);
+            }
+          } catch {}
+
+          return {
+            success: true,
+            attendanceStatus: data.attendance_status,
+            isFullyMarked: Boolean(data.is_fully_marked),
+            message: typeof data.message === 'string' ? data.message : 'Random location check verified!',
+            distanceMeters: data.distance_meters,
+          };
+        }
+
+        return {
+          success: false,
+          message: extractErrorMessage(data?.message, 'Random location verification rejected.'),
+          distanceMeters: data?.distance_meters,
+        };
+      } catch (apiError: any) {
+        // If the backend gave an explicit rejection (400, 403, 409, 422), return clean error directly
+        if (apiError.response && (apiError.response.status === 400 || apiError.response.status === 403 || apiError.response.status === 409 || apiError.response.status === 422)) {
+          const errMsg = extractErrorMessage(apiError, 'Random location verification rejected.');
+          return {
+            success: false,
+            message: errMsg,
+          };
+        }
+        console.log('Backend random check endpoint unavailable, using resilient Supabase DB fallback:', apiError?.message);
+      }
+
+      // 2. Resilient Direct Supabase Database Fallback
+      try {
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        const studentId = authSession?.user?.id;
+        if (!studentId) {
+          return { success: false, message: 'Student is not authenticated.' };
+        }
+
+        // Resolve lecture session
+        let lectureSessionId: string | null = null;
+        let venueId: string | null = null;
+
+        const { data: lsRow } = await supabase
+          .from('lecture_sessions')
+          .select('id, venue_id, course_offering_id, scheduled_at')
+          .eq('id', sessionId)
+          .maybeSingle();
+
+        if (lsRow?.id) {
+          lectureSessionId = lsRow.id;
+          venueId = lsRow.venue_id;
+        } else {
+          // If sessionId is course_offering_id
+          const todayDateStr = new Date().toISOString().split('T')[0];
+          const { data: offLs } = await supabase
+            .from('lecture_sessions')
+            .select('id, venue_id, course_offering_id, scheduled_at')
+            .eq('course_offering_id', sessionId)
+            .gte('scheduled_at', `${todayDateStr}T00:00:00Z`)
+            .lte('scheduled_at', `${todayDateStr}T23:59:59Z`)
+            .order('scheduled_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (offLs?.id) {
+            lectureSessionId = offLs.id;
+            venueId = offLs.venue_id;
+          }
+        }
+
+        if (!lectureSessionId) {
+          return {
+            success: false,
+            message: 'Active lecture session not found for this class.',
+          };
+        }
+
+        // Resolve active random_check window
+        let activeWindowQuery = supabase
+          .from('verification_windows')
+          .select('id, window_type, is_active')
+          .eq('lecture_session_id', lectureSessionId)
+          .eq('window_type', 'random_check')
+          .eq('is_active', true);
+
+        if (cleanWindowId) {
+          activeWindowQuery = activeWindowQuery.eq('id', cleanWindowId);
+        }
+
+        const { data: winData } = await activeWindowQuery.maybeSingle();
+        const activeWindowId = winData?.id || cleanWindowId;
+
+        // Check geofence
+        let venueCoords = { latitude: 6.7951, longitude: 79.9009, radiusMeters: 30 };
+        if (venueId) {
+          const vRes = await this.getVenueDetails(venueId);
+          if (vRes.success && vRes.venue) {
+            venueCoords = vRes.venue;
+          }
+        }
+
+        const dist = calculateHaversineDistance(
+          latitude,
+          longitude,
+          venueCoords.latitude,
+          venueCoords.longitude
+        );
+        const isInside = dist <= venueCoords.radiusMeters;
+
+        if (!isInside) {
+          if (activeWindowId) {
+            try {
+              await supabase.from('verification_attempts').insert({
+                verification_window_id: activeWindowId,
+                student_id: studentId,
+                attempt_number: 1,
+                used_face_verification: false,
+                used_location_check: true,
+                location_method: 'gps_geofence',
+                latitude,
+                longitude,
+                distance_from_venue_meters: Math.round(dist * 100) / 100,
+                status: 'failed',
+                failure_reason: `Outside geofence (${Math.round(dist)}m away, must be <= ${venueCoords.radiusMeters}m)`,
+              });
+            } catch {}
+          }
+
+          return {
+            success: false,
+            message: `Outside geofence (${Math.round(dist)}m away, must be <= ${venueCoords.radiusMeters}m). Attendance not marked.`,
+            distanceMeters: Math.round(dist * 100) / 100,
+          };
+        }
+
+        // Inside geofence: Record random check in attendance_records
+        const nowIso = new Date().toISOString();
+
+        const { data: existingRecord } = await supabase
+          .from('attendance_records')
+          .select('*')
+          .eq('lecture_session_id', lectureSessionId)
+          .eq('student_id', studentId)
+          .maybeSingle();
+
+        const hasInitialCheckIn = Boolean(existingRecord?.first_check_in_at);
+        const finalStatus = hasInitialCheckIn ? (existingRecord?.status === 'late' ? 'late' : 'present') : 'absent';
+
+        if (existingRecord) {
+          await supabase
+            .from('attendance_records')
+            .update({
+              random_check_completed_at: nowIso,
+              status: finalStatus,
+            })
+            .eq('id', existingRecord.id);
+        } else {
+          await supabase
+            .from('attendance_records')
+            .insert({
+              lecture_session_id: lectureSessionId,
+              student_id: studentId,
+              random_check_completed_at: nowIso,
+              status: 'absent',
+            });
+        }
+
+        if (activeWindowId) {
+          try {
+            await supabase.from('verification_attempts').insert({
+              verification_window_id: activeWindowId,
+              student_id: studentId,
+              attempt_number: 1,
+              used_face_verification: false,
+              used_location_check: true,
+              location_method: 'gps_geofence',
+              latitude,
+              longitude,
+              distance_from_venue_meters: Math.round(dist * 100) / 100,
+              status: 'success',
+            });
+          } catch {}
+        }
+
+        await AsyncStorage.removeItem('@enrolled_classes_cache').catch(() => {});
+        await this.invalidateHistoryCache(studentId).catch(() => {});
+
+        const successMsg = hasInitialCheckIn
+          ? `Random location check verified! Both initial biometrics and random check confirmed. Marked as ${finalStatus}.`
+          : 'Random location check verified! Please complete initial verification to finalize full attendance.';
+
+        return {
+          success: true,
+          attendanceStatus: finalStatus,
+          isFullyMarked: hasInitialCheckIn,
+          message: successMsg,
+          distanceMeters: Math.round(dist * 100) / 100,
+        };
+      } catch (dbErr: any) {
+        console.warn('Supabase DB fallback for random check error:', dbErr);
+      }
+
+      return {
+        success: false,
+        message: 'Failed to verify location for random check. Please check connection and try again.',
+      };
+    } catch (error: any) {
+      const msg = extractErrorMessage(error, 'Failed to submit random location verification');
+      return {
+        success: false,
+        message: msg,
+      };
+    }
   }
 
 
@@ -979,7 +1474,10 @@ class ApiService {
       const cached = await AsyncStorage.getItem(key);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
+          if (parsed.length === 0) {
+            return [];
+          }
           const isCorrupted = parsed.some(
             (item: any) =>
               item.courseCode === 'COURSE' ||
@@ -993,6 +1491,7 @@ class ApiService {
           );
           if (isCorrupted) {
             await AsyncStorage.removeItem(key);
+            await AsyncStorage.removeItem(`${key}_meta`);
             return null;
           }
           return parsed;
@@ -1007,14 +1506,12 @@ class ApiService {
   async setCachedHistory(studentId: string | undefined, data: AttendanceHistoryItem[]): Promise<void> {
     try {
       const key = studentId ? `@attendance_history_cache_${studentId}` : '@attendance_history_cache_default';
-      // Only cache valid items where course is not corrupted
+      // Filter out any corrupted entries
       const validToCache = (data || []).filter(
         d => d.courseCode && d.courseCode !== 'COURSE' && d.courseCode !== 'Module'
       );
-      if (validToCache.length > 0) {
-        await AsyncStorage.setItem(key, JSON.stringify(validToCache));
-        await AsyncStorage.setItem(`${key}_meta`, JSON.stringify({ lastSyncedAt: new Date().toISOString() }));
-      }
+      await AsyncStorage.setItem(key, JSON.stringify(validToCache));
+      await AsyncStorage.setItem(`${key}_meta`, JSON.stringify({ lastSyncedAt: new Date().toISOString() }));
     } catch (e) {
       console.warn('Failed to write attendance history cache:', e);
     }
@@ -1024,16 +1521,40 @@ class ApiService {
     try {
       const key = studentId ? `@attendance_history_cache_${studentId}` : '@attendance_history_cache_default';
       await AsyncStorage.removeItem(key);
-    } catch {}
+      await AsyncStorage.removeItem(`${key}_meta`);
+    } catch (e) {
+      console.warn('Failed to invalidate attendance history cache:', e);
+    }
   }
 
-  async getHistory(studentId?: string, forceRefresh: boolean = false): Promise<{ success: boolean; history: AttendanceHistoryItem[]; source: 'network' | 'supabase' | 'cache' | 'mock'; message?: string }> {
+  async clearAllAppDataCache(): Promise<void> {
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const cacheKeys = allKeys.filter(
+        k =>
+          k.startsWith('@attendance_history_cache') ||
+          k === '@enrolled_classes_cache' ||
+          k.startsWith('@timetable_cache')
+      );
+      if (cacheKeys.length > 0) {
+        await Promise.all(cacheKeys.map(k => AsyncStorage.removeItem(k)));
+      }
+    } catch (e) {
+      console.warn('Failed to clear app data cache:', e);
+    }
+  }
+
+  async getHistory(studentId?: string, forceRefresh: boolean = false): Promise<{ success: boolean; history: AttendanceHistoryItem[]; source: 'network' | 'supabase' | 'cache'; message?: string }> {
     let resolvedStudentId = studentId;
     if (!resolvedStudentId) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         resolvedStudentId = session?.user?.id;
       } catch {}
+    }
+
+    if (forceRefresh && resolvedStudentId) {
+      await this.invalidateHistoryCache(resolvedStudentId);
     }
 
     // Preload enrolled classes for offline/fallback module name resolution
@@ -1062,10 +1583,15 @@ class ApiService {
       return { code: '', name: '' };
     };
 
-    // 1. Try FastAPI microservice via Kong
+    // 1. Try FastAPI microservice via Kong / Ingress
     try {
       const response = await apiClient.get('/attendance/me');
-      if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+      if (response.data && Array.isArray(response.data)) {
+        if (response.data.length === 0) {
+          await this.setCachedHistory(resolvedStudentId, []);
+          return { success: true, history: [], source: 'network' };
+        }
+
         // Collect session IDs for module enrichment
         const sessionIdsToEnrich = [
           ...new Set(
@@ -1158,7 +1684,7 @@ class ApiService {
           };
         });
 
-        // Persist to local phone cache only if we have resolved course codes
+        // Persist to local phone cache
         await this.setCachedHistory(resolvedStudentId, historyList);
         return { success: true, history: historyList, source: 'network' };
       }
@@ -1194,7 +1720,12 @@ class ApiService {
           .eq('student_id', resolvedStudentId)
           .order('created_at', { ascending: false });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data)) {
+          if (data.length === 0) {
+            await this.setCachedHistory(resolvedStudentId, []);
+            return { success: true, history: [], source: 'supabase' };
+          }
+
           // Identify any records where nested join failed to produce courseCode
           const missingSessionIds = data
             .filter((r: any) => {
@@ -1280,12 +1811,17 @@ class ApiService {
 
     // 3. Local phone cache fallback (Offline / Airplane mode)
     const cached = await this.getCachedHistory(resolvedStudentId);
-    if (cached && cached.length > 0) {
+    if (cached !== null) {
       return { success: true, history: cached, source: 'cache' };
     }
 
-    // 4. Mock Data Fallback
-    return { success: true, history: mockAttendanceHistory, source: 'mock' };
+    // 4. Offline with no cache available - Return empty array, NEVER mock data
+    return {
+      success: true,
+      history: [],
+      source: 'cache',
+      message: 'No attendance history available offline.',
+    };
   }
 
 }
